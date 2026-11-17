@@ -1,0 +1,10 @@
+## Interface: 16001
+## Title: Manabar
+## Notes: Mana bars for the healers (or any class/spec you pick) in your group: name, mana %, drinking indicator, average bar. Movable.
+## Version: 1.1.0
+## IconTexture: Interface\Icons\INV_Drink_07
+## SavedVariables: ManabarDB
+
+Locales.lua
+Manabar.lua
+Options.lua
