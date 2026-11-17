@@ -44,16 +44,27 @@ end
 -- Helpers
 -------------------------------------------------------------------------------
 
+local ICON_UNKNOWN = "Interface\\Icons\\INV_Misc_QuestionMark"
+
 -- A party of five: Holy Priest (you), Resto Shaman (drinking), Warrior tank,
--- Druid without a role (Resto), Frost Mage.
+-- Resto Druid, Frost Mage.
 local function party5()
     return {
         { name = "Myra", class = "PRIEST", role = "HEALER", spec = 257, mana = 8000, maxMana = 10000, isPlayer = true },
         { name = "Thalia", class = "SHAMAN", role = "HEALER", spec = 264, mana = 4500, maxMana = 10000, auras = { "Drink" } },
         { name = "Brug", class = "WARRIOR", role = "TANK" },
-        { name = "Fern", class = "DRUID", role = "NONE", spec = 105, mana = 2900, maxMana = 10000 },
+        { name = "Fern", class = "DRUID", role = "HEALER", spec = 105, mana = 2900, maxMana = 10000 },
         { name = "Zed", class = "MAGE", role = "DAMAGER", spec = 64, mana = 9000, maxMana = 10000 },
     }
+end
+
+-- The same party, but the druid has no group role: her spec is unknown until
+-- she is inspected.
+local function partyNoRole(spec)
+    local members = party5()
+    members[4].role = "NONE"
+    members[4].spec = spec
+    return members
 end
 
 local function start(opts)
@@ -79,6 +90,7 @@ local function describe(bar)
         name = bar.name.__text, perc = bar.perc.__text, value = bar.status.__value,
         r = c[1], g = c[2], b = c[3],
         drinking = (bar.drinkIcon.__shown and bar.drinkText.__shown) and true or false,
+        icon = bar.iconShown and bar.specIcon.__texture or nil,
         shown = bar.__shown, unit = bar.unit,
         secretText = bar.perc.__textSecret, secretValue = bar.status.__valueSecret, secretColor = tex.__colorSecret,
     }
@@ -136,6 +148,14 @@ local function optionCheck(ns, key)
     fail("no checkbox for option " .. key)
 end
 
+local function classButton(ns, classFile)
+    local _, _, _, buttons = ns.GetOptionsFrame()
+    for _, e in ipairs(buttons) do
+        if e[2] == classFile then return e[1] end
+    end
+    fail("no class button " .. classFile)
+end
+
 local function findButton(win, label)
     for _, child in ipairs(win.__children) do
         if child.__type == "Button" and child.label and child.label.__text == label then return child end
@@ -173,6 +193,11 @@ test("party: healer specs by default, you first, name + % + gradient color", fun
     color(thalia, 1, 0.9, 0, "45%")
     truthy(thalia.drinking, "Thalia drinking")
     falsy(myra.drinking, "Myra not drinking")
+    eq(myra.icon, M.specIcon(257), "own spec icon (Holy)")
+    eq(thalia.icon, M.specIcon(264), "Resto Shaman icon (from the healer role)")
+    eq(fern.icon, M.specIcon(105), "Resto Druid icon (from the healer role)")
+    M.run(3)
+    eq(#M.inspectRequests, 0, "roles were enough, no inspection")
 end)
 
 test("color gradient: 100% green, 50% yellow, 0% red", function()
@@ -275,7 +300,12 @@ test("raid: your bar also reacts to events for the 'player' token", function()
     M.fire("UNIT_POWER_FREQUENT", "player", "MANA")
     M.run(0.15)
     eq(byName(ns, "Me").perc, "25%", "updated via 'player'")
-    eq(#M.inspectRequests, 0, "no inspections needed with the default specs")
+    eq(byName(ns, "Me").icon, M.specIcon(65), "Holy Paladin")
+    eq(byName(ns, "Bram").icon, M.specIcon(105), "druid healer = Restoration")
+    eq(byName(ns, "Ansel").icon, ICON_UNKNOWN, "priest healer: Discipline or Holy")
+    M.run(3)
+    eq(table.concat(M.inspectRequests, ","), "Ansel", "only the priest is inspected (for the icon)")
+    eq(byName(ns, "Ansel").icon, M.specIcon(256), "Discipline after inspection")
     noDebugErrors()
 end)
 
@@ -342,6 +372,12 @@ test("options window: opens with /manabar and the gear, reflects and changes set
     falsy(specCheck(ns, 258):GetChecked(), "Shadow unchecked by default")
     falsy(specCheck(ns, 64):GetChecked(), "Frost Mage unchecked by default")
     truthy(optionCheck(ns, "summary"):GetChecked(), "summary option")
+    falsy(optionCheck(ns, "showUnknown"):GetChecked(), "strict spec filter by default")
+    truthy(optionCheck(ns, "specIcons"):GetChecked(), "spec icons by default")
+    local _, _, specChecks, classButtons = ns.GetOptionsFrame()
+    eq(#classButtons, 7, "7 mana classes")
+    eq(#specChecks, 21, "3 specs each")
+    eq(specCheck(ns, 64).icon.__texture, M.specIcon(64), "spec icon next to the checkbox")
     falsy(optionCheck(ns, "hideInCombat"):GetChecked(), "combat option")
     M.click(findButton(win, "X"))
     falsy(win:IsShown(), "closed with X")
@@ -357,33 +393,106 @@ test("options window: opens with /manabar and the gear, reflects and changes set
     noDebugErrors()
 end)
 
-test("class/spec choice: an ambiguous player is inspected, then shown or hidden exactly", function()
+test("spec filter: only Frost Mage ticked -> a mage is hidden until inspection, then exact", function()
     local ns = start({ group = "party" })
     openOptions(ns)
     M.click(specCheck(ns, 64)) -- Frost Mage on
     eq(ManabarDB.specs[64], true, "saved")
     M.run(0.3)
-    eq(names(ns), "Myra,Fern,Thalia,Zed", "Zed shown while his spec is unknown")
-    M.run(5) -- one inspect every 2 s: Fern (druid without role) is first in the queue
-    eq(table.concat(M.inspectRequests, ","), "Fern,Zed", "inspect order")
+    eq(names(ns), "Myra,Fern,Thalia", "Zed hidden while his spec is unknown")
+    M.run(3)
+    eq(table.concat(M.inspectRequests, ","), "Zed", "only Zed needed an inspection")
     eq(ns.specCache[M.member("party4").guid], 64, "spec learned")
     truthy(M.clearInspectCount > 0, "inspect data released")
     eq(names(ns), "Myra,Fern,Thalia,Zed", "Frost Mage shown")
+    eq(byName(ns, "Zed").icon, M.specIcon(64), "Frost icon")
     M.member("party4").spec = 63 -- respec to Fire
     M.fire("PLAYER_SPECIALIZATION_CHANGED", "party4")
     M.run(0.3)
     eq(names(ns), "Myra,Fern,Thalia", "Fire Mage hidden")
+    eq(M.checkInteractCalls, 0, "no range check API used")
     eq(#M.blocked, 0, "no protected calls")
     noDebugErrors()
 end)
 
-test("a druid without role is shown until inspection tells it is Balance", function()
-    local members = party5()
-    members[4].spec = 102
-    local ns = start({ group = "party", members = members })
-    eq(names(ns), "Myra,Fern,Thalia", "shown while unknown")
+test("no group role: hidden until inspected, then shown only if the spec is ticked", function()
+    local ns = start({ group = "party", members = partyNoRole(105) })
+    eq(names(ns), "Myra,Thalia", "unknown druid hidden")
     M.run(3)
-    eq(names(ns), "Myra,Thalia", "Balance druid hidden after inspection")
+    eq(names(ns), "Myra,Fern,Thalia", "Resto druid shown after inspection")
+    eq(byName(ns, "Fern").icon, M.specIcon(105), "Resto icon")
+
+    ns = start({ group = "party", members = partyNoRole(102) })
+    M.run(3)
+    eq(table.concat(M.inspectRequests, ","), "Fern", "inspected")
+    eq(names(ns), "Myra,Thalia", "Balance druid stays hidden")
+end)
+
+test("'show unknown' option: shown with a question mark until the spec is known", function()
+    local ns = start({ group = "party", members = partyNoRole(102) })
+    openOptions(ns)
+    M.click(optionCheck(ns, "showUnknown"))
+    eq(ManabarDB.showUnknown, true, "saved")
+    M.run(0.3)
+    eq(names(ns), "Myra,Fern,Thalia", "shown while unknown")
+    eq(byName(ns, "Fern").icon, ICON_UNKNOWN, "question mark icon")
+    M.run(3)
+    eq(names(ns), "Myra,Thalia", "hidden once known as Balance")
+end)
+
+test("clicking a class name toggles all of its specs", function()
+    local ns = start({ group = "party" })
+    openOptions(ns)
+    M.click(classButton(ns, "MAGE"))
+    M.run(0.3)
+    truthy(specCheck(ns, 62):GetChecked() and specCheck(ns, 63):GetChecked() and specCheck(ns, 64):GetChecked(),
+        "all mage specs on")
+    eq(names(ns), "Myra,Fern,Thalia,Zed", "any mage shown")
+    M.click(classButton(ns, "MAGE"))
+    M.run(0.3)
+    falsy(specCheck(ns, 64):GetChecked(), "all mage specs off")
+    eq(names(ns), "Myra,Fern,Thalia", "mage hidden")
+    M.click(classButton(ns, "PRIEST")) -- Discipline + Holy on, Shadow off -> all on
+    truthy(specCheck(ns, 258):GetChecked(), "Shadow on too")
+    M.click(classButton(ns, "PRIEST"))
+    falsy(specCheck(ns, 257):GetChecked(), "and all off again")
+    M.run(0.3)
+    eq(names(ns), "Fern,Thalia", "your own Holy Priest bar follows")
+end)
+
+test("your own spec is found by its index if its spec ID is unknown", function()
+    local members = party5()
+    members[1].reportedSpecID = 99999
+    members[1].specIndex = 2 -- Holy
+    local ns = start({ group = "party", members = members })
+    eq(byName(ns, "Myra").icon, M.specIcon(257), "Holy via the spec index")
+    openOptions(ns)
+    M.click(specCheck(ns, 257))
+    M.run(0.3)
+    eq(names(ns), "Fern,Thalia", "unticking Holy hides you")
+end)
+
+test("an inspected spec ID outside the class list is matched by name", function()
+    local members = party5()
+    members[5].spec = 9064
+    local ns = start({ group = "party", members = members })
+    M.extraSpecs[9064] = { 9064, "Frost", "DAMAGER", "MAGE" }
+    openOptions(ns)
+    M.click(specCheck(ns, 64))
+    M.run(3.5)
+    eq(names(ns), "Myra,Fern,Thalia,Zed", "mapped to Frost by name")
+    eq(byName(ns, "Zed").icon, M.specIcon(64), "Frost icon")
+end)
+
+test("spec icons can be turned off", function()
+    local ns = start({ group = "party" })
+    truthy(byName(ns, "Myra").icon, "icon shown by default")
+    openOptions(ns)
+    M.click(optionCheck(ns, "specIcons"))
+    M.run(0.3)
+    eq(byName(ns, "Myra").icon, nil, "no icon")
+    local _, rel = ns.bars[1].name:GetPoint(1)
+    eq(rel, ns.bars[1].status, "name back at the bar's left edge")
 end)
 
 test("unchecking your own spec hides your bar; presets", function()
@@ -407,9 +516,7 @@ test("unchecking your own spec hides your bar; presets", function()
 end)
 
 test("inspection is never started in combat", function()
-    local members = party5()
-    members[4].spec = 102
-    local ns = start({ group = "party", members = members })
+    local ns = start({ group = "party", members = partyNoRole(102) })
     M.setCombat(true)
     M.run(10)
     eq(#M.inspectRequests, 0, "no inspect in combat")
@@ -417,13 +524,12 @@ test("inspection is never started in combat", function()
     M.setCombat(false)
     M.run(3)
     eq(#M.inspectRequests, 1, "inspected after combat")
-    eq(names(ns), "Myra,Thalia", "resolved")
+    eq(ns.specCache[M.member("party3").guid], 102, "resolved")
+    eq(names(ns), "Myra,Thalia", "Balance druid hidden")
 end)
 
 test("inspection timeout is retried later", function()
-    local members = party5()
-    members[4].spec = 102
-    local ns = start({ group = "party", members = members })
+    local ns = start({ group = "party", members = partyNoRole(105) })
     M.flags.inspectNeverAnswers = true
     M.run(3)
     eq(#M.inspectRequests, 1, "first request")
@@ -432,7 +538,7 @@ test("inspection timeout is retried later", function()
     M.flags.inspectNeverAnswers = false
     M.run(40)
     eq(#M.inspectRequests, 2, "retried")
-    eq(names(ns), "Myra,Thalia", "resolved after retry")
+    eq(names(ns), "Myra,Fern,Thalia", "Resto druid shown after the retry")
 end)
 
 test("only out of combat option", function()
@@ -511,6 +617,7 @@ test("test mode: animated sample healers, drinking, offline, average", function(
     M.run(1)
     truthy(rows(ns)[1].value < before, "values animate")
     truthy(byName(ns, "Borak").drinking, "drinking sample")
+    eq(byName(ns, "Aelinor").icon, M.specIcon(257), "sample spec icon")
     eq(byName(ns, "Elyra").perc, "Offline", "offline sample")
     truthy(ns.GetSummaryBar():IsShown(), "average shown")
     contains(ns.GetSummaryBar().perc.__text, "%", "average %")
@@ -523,6 +630,7 @@ test("manual lists: add / ignore / remove / list", function()
     slash("add Zed")
     M.run(0.3)
     eq(names(ns), "Myra,Fern,Thalia,Zed", "added")
+    eq(byName(ns, "Zed").icon, ICON_UNKNOWN, "spec not known yet")
     slash("ignore thalia")
     M.run(0.3)
     eq(names(ns), "Myra,Fern,Zed", "ignored (case-insensitive)")

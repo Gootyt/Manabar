@@ -45,12 +45,15 @@ ns.STRINGS = {
         optHideInCombat = "Csak harcon kívül látszik",
         optSummary      = "Átlag bar a lista alján (a mutatott barok átlaga)",
         optShowSelf     = "A saját manám is látszik",
+        optShowUnknown  = "Akinek még nem ismert a specje, az is látszik (amíg ki nem derül)",
+        optSpecIcons    = "Spec ikon a bar elején",
         optLocked       = "Ablak rögzítése (nem mozgatható)",
-        optSpecs        = "Kinek a manáját mutassa? (kaszt / spec)",
+        optSpecs        = "Melyik kaszt / spec manája látszódjon? (a kaszt nevére kattintva az egész sor)",
+        classTip        = "Kattintás: a kaszt összes specje be / ki",
         optHealers      = "Csak healerek",
         optAll          = "Mind",
         optNone         = "Egyik sem",
-        optHint         = "Akinek a specje még nem ismert, annál a csapatszerepe (tank / healer / dps) dönt. "
+        optHint         = "A specet a csapatszerep vagy egy rövid inspect alapján ismeri fel (csak harcon kívül). "
             .. "Az átlag harc közben csak akkor számolható, ha a játék engedi olvasni a manát.",
 
         help = {
@@ -111,12 +114,15 @@ ns.STRINGS = {
         optHideInCombat = "Only show out of combat",
         optSummary      = "Summary bar at the bottom (average)",
         optShowSelf     = "Show my own mana too",
+        optShowUnknown  = "Also show players whose spec is not known yet",
+        optSpecIcons    = "Spec icon at the start of the bar",
         optLocked       = "Lock the frame (not movable)",
-        optSpecs        = "Whose mana to show? (class / spec)",
+        optSpecs        = "Which class / spec to show? (click a class name for its whole row)",
+        classTip        = "Click: all specs of this class on / off",
         optHealers      = "Healers only",
         optAll          = "All",
         optNone         = "None",
-        optHint         = "While someone's spec is not known yet, their group role (tank / healer / dps) decides. "
+        optHint         = "The spec is recognised from the group role or a short inspect (out of combat only). "
             .. "In combat the average can only be calculated if the game lets addons read the mana.",
 
         help = {

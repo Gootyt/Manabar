@@ -33,6 +33,8 @@ local DEFAULTS = {
     showSelf     = true,  -- your own bar too (if your spec is selected)
     hideInCombat = false, -- only show the frame out of combat
     summary      = true,  -- average bar at the bottom (shown with 2+ bars)
+    showUnknown  = false, -- show players whose spec is not known yet (when it matters)
+    specIcons    = true,  -- spec icon at the start of each bar
     lang         = "hu",
     debug        = false,
 }
@@ -65,6 +67,7 @@ local BAR_TEXTURE       = "Interface\\TargetingFrame\\UI-StatusBar"
 local WHITE_TEXTURE     = "Interface\\Buttons\\WHITE8x8"
 local DRINK_ICON        = "Interface\\Icons\\INV_Drink_07"
 local GEAR_ICON         = "Interface\\Icons\\INV_Misc_Gear_01"
+local UNKNOWN_SPEC_ICON = "Interface\\Icons\\INV_Misc_QuestionMark"
 local FONT              = STANDARD_TEXT_FONT or "Fonts\\FRIZQT__.TTF"
 local PT_MANA           = (Enum and Enum.PowerType and Enum.PowerType.Mana) or 0
 local BACKDROP_TEMPLATE = BackdropTemplateMixin and "BackdropTemplate" or nil
@@ -94,11 +97,11 @@ local DRINK_NAMES     = { "Drink", "Food & Drink", "Refreshment" }
 
 -- Sample healers for /manabar test.
 local FAKE_HEALERS = {
-    { name = "Aelinor", value = 0.97, rate = -0.03 },
-    { name = "Borak",   value = 0.40, rate = 0.08, drinking = true },
-    { name = "Celeste", value = 0.63, rate = -0.05 },
-    { name = "Dorn",    value = 0.18, rate = -0.02 },
-    { name = "Elyra",   state = "offline" },
+    { name = "Aelinor", specID = 257, value = 0.97, rate = -0.03 },
+    { name = "Borak",   specID = 264, value = 0.40, rate = 0.08, drinking = true },
+    { name = "Celeste", specID = 65,  value = 0.63, rate = -0.05 },
+    { name = "Dorn",    specID = 105, value = 0.18, rate = -0.02 },
+    { name = "Elyra",   specID = 256, state = "offline" },
 }
 
 -------------------------------------------------------------------------------
@@ -317,10 +320,13 @@ local function BuildSpecData()
         local count = Plain(Call(getNum, classID))
         if type(count) == "number" then
             for i = 1, count do
-                local id, name, _, _, role = Call(GetSpecializationInfoForClassID, classID, i)
-                id, name, role = Plain(id), Plain(name), Plain(role)
+                local id, name, _, icon, role = Call(GetSpecializationInfoForClassID, classID, i)
+                id, name, icon, role = Plain(id), Plain(name), Plain(icon), Plain(role)
                 if type(id) == "number" and id > 0 and type(name) == "string" then
-                    specs[#specs + 1] = { id = id, name = name, role = type(role) == "string" and role or "DAMAGER" }
+                    specs[#specs + 1] = {
+                        id = id, name = name, icon = icon,
+                        role = type(role) == "string" and role or "DAMAGER",
+                    }
                 end
             end
         end
@@ -348,23 +354,43 @@ local function IsSpecEnabled(specID)
     return spec ~= nil and spec.role == "HEALER"
 end
 
-local function PlayerSpecID()
+-- Maps a spec ID from any API to the spec entry of the class. An ID the class
+-- list does not know is matched by its name (GetSpecializationInfoByID).
+local function SpecEntry(specID, specs)
+    if type(specID) ~= "number" or specID <= 0 or not specs or not specs[1] then return nil end
+    local spec = specInfoByID[specID]
+    if spec then
+        if spec.classFile == specs[1].classFile then return spec end
+        return nil
+    end
+    local _, name = Call(GetSpecializationInfoByID, specID)
+    name = Plain(name)
+    if type(name) == "string" then
+        for i = 1, #specs do
+            if specs[i].name == name then return specs[i] end
+        end
+    end
+end
+
+-- Your own spec; falls back to the spec index (same order as the class list).
+local function PlayerSpec(specs)
     local getSpec = (C_SpecializationInfo and C_SpecializationInfo.GetSpecialization) or GetSpecialization
     local index = Plain(Call(getSpec))
     if type(index) ~= "number" or index <= 0 then return nil end
     local getInfo = (C_SpecializationInfo and C_SpecializationInfo.GetSpecializationInfo) or GetSpecializationInfo
-    local id = Plain((Call(getInfo, index)))
-    if type(id) == "number" and id > 0 then return id end
+    return SpecEntry(Plain((Call(getInfo, index))), specs) or (specs and specs[index])
 end
 
-local function UnitSpecID(unit, isSelf, guid)
-    if isSelf then return PlayerSpecID() end
+-- The spec of a group member if known: yours, or from (cached) inspection.
+local function KnownSpec(unit, isSelf, guid, specs)
+    if isSelf then return PlayerSpec(specs) end
     local id = Plain(Call(GetInspectSpecialization, unit))
     if type(id) == "number" and id > 0 then
         if guid then specCache[guid] = id end
-        return id
+    elseif guid then
+        id = specCache[guid]
     end
-    if guid then return specCache[guid] end
+    return SpecEntry(id, specs)
 end
 
 -------------------------------------------------------------------------------
@@ -403,11 +429,11 @@ local function InspectFrameOpen()
     return InspectFrame ~= nil and InspectFrame.IsShown ~= nil and InspectFrame:IsShown() == true
 end
 
--- Only called out of combat: CheckInteractDistance is protected in combat.
+-- No range check on purpose (CheckInteractDistance is restricted on modern
+-- clients): an unanswered request simply times out and is retried later.
 local function CanInspectNow(unit)
-    if not Plain(Call(CanInspect, unit)) then return false end
-    if CheckInteractDistance and Plain(Call(CheckInteractDistance, unit, 1)) == false then return false end
-    return true
+    if Plain(Call(UnitIsConnected, unit)) == false then return false end
+    return Plain(Call(CanInspect, unit)) ~= false
 end
 
 ProcessInspectQueue = function()
@@ -493,30 +519,41 @@ local function CandidateSpecs(specs, role)
     return specs
 end
 
--- Returns: show, needsInspect.
--- Order: manual lists, exact spec, then class + group role.
-local function ShouldShow(unit, isSelf, name, guid)
+-- Decides by class AND spec. Returns: show, spec (entry or nil), specUnknown,
+-- needsInspect.
+--   1. manual lists (/manabar add / ignore)
+--   2. known spec (yours, or inspected): exactly the ticked specs
+--   3. spec unknown: the group role narrows the class's specs down; one left =
+--      that is the spec. If all candidates are ticked (or none), the answer is
+--      clear anyway. Otherwise the player is hidden (unless "show unknown" is
+--      on) until a short inspection tells the spec.
+local function Evaluate(unit, isSelf, name, guid)
     local key = name and name:lower()
-    if key then
-        if db.exclude[key] then return false, false end
-        if db.include[key] then return true, false end
-    end
+    if key and db.exclude[key] then return false, nil, false, false end
+    local forced = (key and db.include[key]) and true or false
 
     local _, classFile = Call(UnitClass, unit)
     classFile = Plain(classFile)
     local specs = classFile and specsByClass[classFile]
-    if not specs then return false, false end
+    if not specs then return forced, nil, false, false end
 
-    local specID = UnitSpecID(unit, isSelf, guid)
-    if specID and specInfoByID[specID] then return IsSpecEnabled(specID), false end
+    local spec = KnownSpec(unit, isSelf, guid, specs)
+    local candidates
+    if not spec then
+        candidates = CandidateSpecs(specs, Plain(Call(UnitGroupRolesAssigned, unit)))
+        if #candidates == 1 then spec = candidates[1] end
+    end
+    if spec then return forced or IsSpecEnabled(spec.id), spec, false, false end
 
-    local candidates = CandidateSpecs(specs, Plain(Call(UnitGroupRolesAssigned, unit)))
     local anyOn, anyOff = false, false
     for i = 1, #candidates do
         if IsSpecEnabled(candidates[i].id) then anyOn = true else anyOff = true end
     end
-    -- Ambiguous (some candidates on, some off): show for now, inspect to be sure.
-    return anyOn, anyOn and anyOff and not isSelf
+    local ambiguous = anyOn and anyOff
+    local show = forced or (anyOn and (not anyOff or db.showUnknown))
+    -- Inspect when the spec decides, or to show the spec icon of a shown bar.
+    local needsInspect = not isSelf and (ambiguous or (show and db.specIcons))
+    return show, nil, true, needsInspect
 end
 
 local function GetGroupUnits(out)
@@ -561,8 +598,12 @@ local function CollectUnits()
             local isSelf = IsSelfUnit(unit, guid)
             if not isSelf or db.showSelf then
                 local name = Plain((Call(UnitName, unit)))
-                local show, needsInspect = ShouldShow(unit, isSelf, name, guid)
-                if show then list[#list + 1] = { unit = unit, name = name, isSelf = isSelf } end
+                local show, spec, specUnknown, needsInspect = Evaluate(unit, isSelf, name, guid)
+                if show then
+                    list[#list + 1] = {
+                        unit = unit, name = name, isSelf = isSelf, spec = spec, specUnknown = specUnknown,
+                    }
+                end
                 if needsInspect then QueueInspect(guid) end
             end
         end
@@ -579,7 +620,11 @@ end
 local function AnchorName(bar)
     local name = bar.name
     name:ClearAllPoints()
-    name:SetPoint("LEFT", bar.status, "LEFT", 4, 0)
+    if bar.iconShown then
+        name:SetPoint("LEFT", bar.specIcon, "RIGHT", 3, 0)
+    else
+        name:SetPoint("LEFT", bar.status, "LEFT", 4, 0)
+    end
     if bar.drinking then
         name:SetPoint("RIGHT", bar.drinkIcon, "LEFT", -3, 0)
     else
@@ -594,6 +639,26 @@ local function SetDrinking(bar, drinking)
     bar.drinkIcon:SetShown(drinking)
     bar.drinkText:SetShown(drinking)
     AnchorName(bar)
+end
+
+-- Spec icon at the start of the bar: the spec's icon, or a question mark while
+-- the spec is not known yet.
+local function SetSpecIcon(bar, spec, unknown)
+    local texture
+    if db.specIcons then
+        if spec and spec.icon then
+            texture = spec.icon
+        elseif unknown then
+            texture = UNKNOWN_SPEC_ICON
+        end
+    end
+    if texture then bar.specIcon:SetTexture(texture) end
+    local shown = texture ~= nil
+    if bar.iconShown ~= shown then
+        bar.iconShown = shown
+        bar.specIcon:SetShown(shown)
+        AnchorName(bar)
+    end
 end
 
 local function SetGray(bar, text)
@@ -802,13 +867,20 @@ local function CreateBar()
     drinkIcon:Hide()
     bar.drinkIcon = drinkIcon
 
+    local specIcon = sb:CreateTexture(nil, "OVERLAY")
+    specIcon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+    specIcon:SetSize(14, 14)
+    specIcon:SetPoint("LEFT", sb, "LEFT", 2, 0)
+    specIcon:Hide()
+    bar.specIcon = specIcon
+
     local name = sb:CreateFontString(nil, "OVERLAY")
     name:SetFont(FONT, 11, "OUTLINE")
     name:SetJustifyH("LEFT")
     name:SetWordWrap(false)
     bar.name = name
 
-    bar.drinking = false
+    bar.drinking, bar.iconShown = false, false
     AnchorName(bar)
     return bar
 end
@@ -819,6 +891,7 @@ local function StyleBar(bar, w, h, fontSize)
     bar.perc:SetFont(FONT, fontSize, "OUTLINE")
     bar.drinkText:SetFont(FONT, math.max(7, fontSize - 1), "OUTLINE")
     bar.drinkIcon:SetSize(h - 4, h - 4)
+    bar.specIcon:SetSize(h - 4, h - 4)
 end
 
 local function Layout()
@@ -872,9 +945,11 @@ local function Rebuild()
         if testMode then
             bar.unit, bar.fake = nil, info
             bar.name:SetText(info.name)
+            SetSpecIcon(bar, specInfoByID[info.specID], false)
         else
             bar.unit, bar.fake = info.unit, nil
             bar.name:SetText(info.name or Call(UnitName, info.unit) or "?")
+            SetSpecIcon(bar, info.spec, info.specUnknown)
             unitToBar[info.unit] = bar
             if info.isSelf then unitToBar.player = bar end
         end
@@ -1108,13 +1183,25 @@ local function SetOption(key, value)
     elseif key == "summary" then
         Layout()
         UpdateSummary()
-    elseif key == "showSelf" then
+    elseif key == "showSelf" or key == "showUnknown" or key == "specIcons" then
         ScheduleRebuild()
     end
 end
 
 local function SetSpecEnabled(specID, enabled)
     db.specs[specID] = enabled and true or false
+    ScheduleRebuild()
+end
+
+-- All specs of a class on, or off if they were all on already.
+local function ToggleClass(classFile)
+    local specs = specsByClass[classFile]
+    if not specs then return end
+    local allOn = true
+    for i = 1, #specs do
+        if not IsSpecEnabled(specs[i].id) then allOn = false end
+    end
+    for i = 1, #specs do db.specs[specs[i].id] = not allOn end
     ScheduleRebuild()
 end
 
@@ -1373,6 +1460,7 @@ ns.GetClassSpecs = function() return classSpecs end
 ns.IsSpecEnabled = IsSpecEnabled
 ns.SetSpecEnabled = SetSpecEnabled
 ns.SetAllSpecs = SetAllSpecs
+ns.ToggleClass = ToggleClass
 ns.SetOption = SetOption
 ns.FONT = FONT
 ns.WHITE_TEXTURE = WHITE_TEXTURE

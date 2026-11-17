@@ -758,16 +758,37 @@ local function findSpec(specID)
     end
 end
 
-function API.GetSpecialization()
-    local id = M.state.player and M.state.player.spec
-    if not id then return nil end
-    return 1
+local CLASS_IDS_BY_FILE = { PALADIN = 2, HUNTER = 3, PRIEST = 5, SHAMAN = 7, MAGE = 8, WARLOCK = 9, DRUID = 11 }
+
+-- Spec icons are fake file IDs: 1000 + specID.
+local function specIcon(id) return 1000 + id end
+M.specIcon = specIcon
+
+local function playerSpecIndex()
+    local p = M.state.player
+    if not p then return nil end
+    if p.specIndex then return p.specIndex end
+    local specs = M.classSpecData[CLASS_IDS_BY_FILE[p.class] or 0]
+    if not (specs and p.spec) then return nil end
+    for i, spec in ipairs(specs) do
+        if spec[1] == p.spec then return i end
+    end
 end
+
+function API.GetSpecialization() return playerSpecIndex() end
+-- player.reportedSpecID simulates a spec ID the class list does not know.
 function API.GetSpecializationInfo(index)
-    local id = M.state.player and M.state.player.spec
-    local s = id and findSpec(id)
-    if index ~= 1 or not s then return nil end
-    return s[1], s[2], "", 0, s[3], 1
+    local p = M.state.player
+    if not p or index ~= playerSpecIndex() then return nil end
+    if p.reportedSpecID then return p.reportedSpecID, "?", "", 0, "NONE", 1 end
+    local spec = M.classSpecData[CLASS_IDS_BY_FILE[p.class]][index]
+    return spec[1], spec[2], "", specIcon(spec[1]), spec[3], 1
+end
+-- M.extraSpecs[id] = { id, name, role, classFile }: IDs outside the class lists.
+function API.GetSpecializationInfoByID(id)
+    local spec = findSpec(id) or M.extraSpecs[id]
+    if not spec then return nil end
+    return spec[1], spec[2], "", specIcon(spec[1]), spec[3], spec[4], spec[4]
 end
 function API.GetClassInfo(classID)
     if not CLASS_NAMES[classID] then return nil end
@@ -780,7 +801,7 @@ end
 function API.GetSpecializationInfoForClassID(classID, index)
     local s = M.classSpecData[classID] and M.classSpecData[classID][index]
     if not s then return nil end
-    return s[1], s[2], "", 0, s[3], false, true
+    return s[1], s[2], "", specIcon(s[1]), s[3], false, true
 end
 function API.GetInspectSpecialization(unit)
     local m = member(unit)
@@ -800,6 +821,7 @@ end
 -- Protected in combat in the real client: an addon calling it there is blocked
 -- (no Lua error, the client shows "Interface action failed"), so record it.
 function API.CheckInteractDistance(unit, index)
+    M.checkInteractCalls = M.checkInteractCalls + 1
     if M.state.inCombat then
         table.insert(M.blocked, "CheckInteractDistance")
         return nil
@@ -882,6 +904,8 @@ function M.install(opts)
     }
     M.inspectData = {}
     M.blocked = {}
+    M.extraSpecs = {}
+    M.checkInteractCalls = 0
     M.inspectRequests = {}
     M.clearInspectCount = 0
     M.spellNames = { [430] = "Drink", [431] = "Drink", [432] = "Drink", [1133] = "Drink",

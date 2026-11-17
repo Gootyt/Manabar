@@ -5,7 +5,7 @@ kiválasztott kaszt/spec kombinációnak – a manáját mutatja egy-egy baron.
 
 ## Mit tud
 
-- **Egy bar játékosonként**: a bal oldalon a név, a jobb oldalon a mana %-a.
+- **Egy bar játékosonként**: a bal oldalon a spec ikonja és a név, a jobb oldalon a mana %-a.
 - **Ivás jelzése**: ha valaki iszik (Drink buff), egy pohár ikon és az „Iszik” felirat
   jelenik meg a baron.
 - **Színátmenet**: 100%-on zöld, 50%-on sárga, 0%-on piros, közte folyamatos átmenet.
@@ -17,10 +17,13 @@ kiválasztott kaszt/spec kombinációnak – a manáját mutatja egy-egy baron.
   - csak harcon kívül látszik
   - átlag bar a lista alján
   - a saját manád is látszik-e
+  - akinek még nem ismert a specje, az is látszódjon-e (alapból nem)
+  - spec ikon a bar elején
   - ablak rögzítése
-  - **kinek a manáját mutassa**: kaszt/spec rácsban pipálhatod ki (Priest, Paladin,
-    Shaman, Druid, Mage, Warlock, Hunter). Alapból a healer specek vannak bepipálva.
-    Gyorsgombok: *Csak healerek*, *Mind*, *Egyik sem*.
+  - **kinek a manáját mutassa**: kaszt **és** spec szerint, egy rácsban pipálhatod ki
+    (Priest, Paladin, Shaman, Druid, Mage, Warlock, Hunter – mindegyiknél külön a 3 spec).
+    A kaszt nevére kattintva az egész sor be/ki kapcsol. Alapból a healer specek vannak
+    bepipálva. Gyorsgombok: *Csak healerek*, *Mind*, *Egyik sem*.
 - Offline / halott állapot szürke barral („Offline”, „Halott”).
 - Magyar és angol felület (`/manabar lang hu` / `/manabar lang en`).
 
@@ -63,14 +66,21 @@ Első indításkor az ablak feloldva, középen jelenik meg: húzd a helyére, m
 
 ## Hogyan dönti el, kit mutasson?
 
+A szűrés kaszt **és** spec szerint történik: ha például csak a Frost Mage van bepipálva,
+egy Fire Mage nem jelenik meg.
+
 1. Kézi listák (`add` / `ignore`) – ezek mindent felülírnak.
-2. Ha a játékos specje ismert (a sajátod mindig, másoké inspect után), a beállítások
-   ablakban kipipált spec dönt.
-3. Ha a spec még nem ismert, a kaszt és a csapatszerep (tank / healer / dps) alapján
-   dönt. Ha ez nem egyértelmű (pl. szerep nélküli Druid, vagy csak a Frost Mage van
-   bepipálva), az illető addig látszik, amíg az addon egy rövid **inspecttel** ki nem
-   deríti a specjét. Inspect csak harcon kívül történik, legfeljebb 2 másodpercenként
-   egy, és csak annál, akinél tényleg számít.
+2. Ha a játékos specje ismert (a sajátod mindig, másoké inspect után), csak a
+   kipipált specek látszanak.
+3. Ha a spec még nem ismert, a csapatszerep (tank / healer / dps) szűkít: pl. Paladin +
+   healer szerep = Holy, Priest + dps szerep = Shadow. Ha így is több spec lehetséges,
+   és ezek nem egyformán vannak pipálva, az illető **rejtve marad**, amíg egy rövid
+   **inspect** ki nem deríti a specjét (csak harcon kívül, legfeljebb 2 másodpercenként
+   egy játékos). Ha inkább azonnal látni szeretnéd, kapcsold be a beállításokban az
+   „Akinek még nem ismert a specje, az is látszik” opciót – ilyenkor kérdőjel ikon jelzi,
+   hogy a spec még nem biztos.
+
+A bar elején lévő ikon mutatja, minek ismerte fel az addon az illetőt.
 
 ## Harc közbeni korlátozások (Midnight „secret values”)
 

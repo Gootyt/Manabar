@@ -5,9 +5,10 @@ local _, ns = ...
 
 local PAD        = 14
 local CLASS_COL  = 86   -- width of the class name column
-local SPEC_COL   = 132  -- width of one spec checkbox column
+local SPEC_COL   = 140  -- width of one spec checkbox column
 local ROW_H      = 22
 local CHECK_SIZE = 20
+local ICON_SIZE  = 14
 
 local CHECK_TEXTURES = {
     normal    = "Interface\\Buttons\\UI-CheckBox-Up",
@@ -28,6 +29,8 @@ local OPTIONS = {
     { key = "hideInCombat", text = "optHideInCombat" },
     { key = "summary",      text = "optSummary" },
     { key = "showSelf",     text = "optShowSelf" },
+    { key = "showUnknown",  text = "optShowUnknown" },
+    { key = "specIcons",    text = "optSpecIcons" },
     { key = "locked",       text = "optLocked" },
 }
 
@@ -41,6 +44,7 @@ local win
 local labels = {}       -- { fontString, text key } for re-translation
 local optionChecks = {} -- { checkButton, SavedVariables key }
 local specChecks = {}   -- { checkButton, specID }
+local classButtons = {} -- { button, classFile }
 
 local function T(key)
     local texts = ns.GetL()
@@ -167,17 +171,51 @@ local function Create()
     Localize(specsTitle, "optSpecs")
     y = y - 18
     for _, class in ipairs(classSpecs) do
-        local className = NewText(win, 12, ClassColor(class.classFile))
-        className:SetPoint("TOPLEFT", win, "TOPLEFT", PAD, y - 4)
+        -- The class name toggles the whole row.
+        local classFile = class.classFile
+        local classButton = CreateFrame("Button", nil, win)
+        classButton:SetSize(CLASS_COL - 6, CHECK_SIZE)
+        classButton:SetPoint("TOPLEFT", win, "TOPLEFT", PAD, y)
+        local className = NewText(classButton, 12, ClassColor(classFile))
+        className:SetPoint("LEFT", classButton, "LEFT", 0, 0)
         className:SetWidth(CLASS_COL - 6)
         className:SetWordWrap(false)
         className:SetText(class.name)
+        classButton.label = className
+        classButton:SetScript("OnClick", function()
+            ns.ToggleClass(classFile)
+            ns.RefreshOptions()
+        end)
+        classButton:SetScript("OnEnter", function(self)
+            if not GameTooltip then return end
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            GameTooltip:SetText(class.name)
+            GameTooltip:AddLine(T("classTip"), 1, 1, 1)
+            GameTooltip:Show()
+        end)
+        classButton:SetScript("OnLeave", function(self)
+            if GameTooltip and GameTooltip:IsOwned(self) then GameTooltip:Hide() end
+        end)
+        classButtons[#classButtons + 1] = { classButton, classFile }
+
+        local labelWidth = SPEC_COL - CHECK_SIZE - 6
         for i, spec in ipairs(class.specs) do
             local specID = spec.id
-            local cb = NewCheck(win, SPEC_COL - CHECK_SIZE - 6, function(self)
+            local cb = NewCheck(win, labelWidth, function(self)
                 ns.SetSpecEnabled(specID, self:GetChecked() and true or false)
             end)
             cb:SetPoint("TOPLEFT", win, "TOPLEFT", PAD + CLASS_COL + (i - 1) * SPEC_COL, y)
+            if spec.icon then
+                local icon = cb:CreateTexture(nil, "ARTWORK")
+                icon:SetSize(ICON_SIZE, ICON_SIZE)
+                icon:SetPoint("LEFT", cb, "RIGHT", 1, 0)
+                icon:SetTexture(spec.icon)
+                icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+                cb.icon = icon
+                cb.label:ClearAllPoints()
+                cb.label:SetPoint("LEFT", icon, "RIGHT", 3, 0)
+                cb.label:SetWidth(labelWidth - ICON_SIZE - 6)
+            end
             cb.label:SetText(spec.name)
             specChecks[#specChecks + 1] = { cb, specID }
         end
@@ -242,5 +280,5 @@ end
 
 -- For the offline tests.
 function ns.GetOptionsFrame()
-    return win, optionChecks, specChecks
+    return win, optionChecks, specChecks, classButtons
 end
