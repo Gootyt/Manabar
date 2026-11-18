@@ -1,7 +1,7 @@
 ## Interface: 16001
 ## Title: Manabar
-## Notes: Mana bars for the healers (or any class + spec you pick) in your group: name, mana %, drinking indicator, average bar. Movable.
-## Version: 1.2.0
+## Notes: Mana bars for all mana users out of combat (healers first) and healers only in combat: name, mana %, drinking indicator, average bar. Movable.
+## Version: 1.3.0
 ## IconTexture: Interface\Icons\INV_Drink_07
 ## SavedVariables: ManabarDB
 

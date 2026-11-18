@@ -1,10 +1,15 @@
 # Manabar
 
-WoW Forever addon (Interface 16001), ami a csapatod healereinek – vagy bármelyik
-kiválasztott kaszt/spec kombinációnak – a manáját mutatja egy-egy baron.
+WoW Forever addon (Interface 16001), ami harcon kívül a csapatod összes
+manahasználójának – harc közben alapból csak a healereknek – a manáját mutatja
+egy-egy baron (a healerek mindig a lista elején vannak).
 
 ## Mit tud
 
+- **Harcon kívül minden manahasználó, harcban csak a healerek**: alapértelmezésben
+  harcon kívül az összes manahasználó kaszt látszik, a healerekkel a lista elején;
+  amint harcba lépsz, a lista automatikusan a healerekre szűkül, harc után pedig
+  visszaáll.
 - **Egy bar játékosonként**: a bal oldalon a spec ikonja és a név, a jobb oldalon a mana %-a.
 - **Ivás jelzése**: ha valaki iszik (Drink buff), egy pohár ikon és az „Iszik” felirat
   jelenik meg a baron.
@@ -14,6 +19,7 @@ kiválasztott kaszt/spec kombinációnak – a manáját mutatja egy-egy baron.
 - **Mozgatható**: feloldott állapotban bal egérgombbal húzható. Rögzítés: jobb klikk
   az ablakon vagy `/manabar lock`.
 - **Beállítások ablak** a fogaskerék ikonra kattintva (vagy `/manabar`):
+  - harc közben csak a healerek látszanak (alapból bekapcsolva)
   - csak harcon kívül látszik
   - átlag bar a lista alján
   - a saját manád is látszik-e
@@ -22,8 +28,8 @@ kiválasztott kaszt/spec kombinációnak – a manáját mutatja egy-egy baron.
   - ablak rögzítése
   - **kinek a manáját mutassa**: kaszt **és** spec szerint, egy rácsban pipálhatod ki
     (Priest, Paladin, Shaman, Druid, Mage, Warlock, Hunter – mindegyiknél külön a 3 spec).
-    A kaszt nevére kattintva az egész sor be/ki kapcsol. Alapból a healer specek vannak
-    bepipálva. Gyorsgombok: *Csak healerek*, *Mind*, *Egyik sem*.
+    A kaszt nevére kattintva az egész sor be/ki kapcsol. Alapból minden manahasználó spec
+    be van pipálva. Gyorsgombok: *Mind*, *Csak healerek*, *Egyik sem*.
 - Offline / halott állapot szürke barral („Offline”, „Halott”).
 - Magyar és angol felület (`/manabar lang hu` / `/manabar lang en`).
 
@@ -53,6 +59,7 @@ Első indításkor az ablak feloldva, középen jelenik meg: húzd a helyére, m
 | `/manabar reset` | pozíció és méret visszaállítása |
 | `/manabar scale 1.2` | méretarány (0.5 – 3, tizedesvessző is jó) |
 | `/manabar width 220` / `height 20` | bar szélesség (100 – 400) / magasság (12 – 40) |
+| `/manabar healers` | harc közben csak a healerek be/ki |
 | `/manabar combat` | csak harcon kívül látszik be/ki |
 | `/manabar summary` | átlag bar be/ki |
 | `/manabar self` | saját mana mutatása be/ki |
@@ -66,19 +73,20 @@ Első indításkor az ablak feloldva, középen jelenik meg: húzd a helyére, m
 
 ## Hogyan dönti el, kit mutasson?
 
-A szűrés kaszt **és** spec szerint történik: ha például csak a Frost Mage van bepipálva,
-egy Fire Mage nem jelenik meg.
+A szűrés kaszt **és** spec szerint történik, a healerek pedig mindig a lista elején
+szerepelnek (harcon kívül is). Harc közben a „Harc közben csak a healerek látszanak”
+opció (alapból bekapcsolva) a kipipált specekből is csak a healereket hagyja meg.
 
 1. Kézi listák (`add` / `ignore`) – ezek mindent felülírnak.
-2. Ha a játékos specje ismert (a sajátod mindig, másoké inspect után), csak a
-   kipipált specek látszanak.
+2. Ha a játékos specje ismert (a sajátod mindig, másoké inspect után), a kipipált
+   specek látszanak (harc közben pedig csak a healerek, ha az opció be van kapcsolva).
 3. Ha a spec még nem ismert, a csapatszerep (tank / healer / dps) szűkít: pl. Paladin +
    healer szerep = Holy, Priest + dps szerep = Shadow. Ha így is több spec lehetséges,
-   és ezek nem egyformán vannak pipálva, az illető **rejtve marad**, amíg egy rövid
+   és ezek nem egyformán látszanának, az illető **rejtve marad**, amíg egy rövid
    **inspect** ki nem deríti a specjét (csak harcon kívül, legfeljebb 2 másodpercenként
-   egy játékos). Ha inkább azonnal látni szeretnéd, kapcsold be a beállításokban az
-   „Akinek még nem ismert a specje, az is látszik” opciót – ilyenkor kérdőjel ikon jelzi,
-   hogy a spec még nem biztos.
+   egy játékos; az ismeretlen szerepű hibridek előnyt élveznek). Ha inkább azonnal látni
+   szeretnéd, kapcsold be a beállításokban az „Akinek még nem ismert a specje, az is
+   látszik” opciót – ilyenkor kérdőjel ikon jelzi, hogy a spec még nem biztos.
 
 A bar elején lévő ikon mutatja, minek ismerte fel az addon az illetőt.
 
@@ -109,9 +117,9 @@ Fájlok: `Manabar/Locales.lua` (szövegek), `Manabar/Manabar.lua` (barok, logika
 
 ---
 
-**English:** Manabar shows the mana of the healers (or any class/spec combination you
-select) in your WoW Forever party or raid: name, mana %, a drinking indicator, a
-red → yellow → green color gradient and an optional average bar. Drag it while
-unlocked, click the gear icon (or type `/manabar`) for the settings, and use
-`/manabar lang en` for English texts. Install by copying the `Manabar` folder into
-`World of Warcraft\_forever_\Interface\AddOns\`.
+**English:** Manabar shows the mana of all mana users out of combat (with healers
+always listed first) and only the healers in combat in your WoW Forever party or raid:
+name, mana %, a drinking indicator, a red → yellow → green color gradient and an
+optional average bar. Drag it while unlocked, click the gear icon (or type `/manabar`)
+for the settings, and use `/manabar lang en` for English texts. Install by copying the
+`Manabar` folder into `World of Warcraft\_forever_\Interface\AddOns\`.

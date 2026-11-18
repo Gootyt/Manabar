@@ -26,17 +26,18 @@ local CLASS_COLORS = {
 
 -- Display options: SavedVariables key + text key.
 local OPTIONS = {
-    { key = "hideInCombat", text = "optHideInCombat" },
-    { key = "summary",      text = "optSummary" },
-    { key = "showSelf",     text = "optShowSelf" },
-    { key = "showUnknown",  text = "optShowUnknown" },
-    { key = "specIcons",    text = "optSpecIcons" },
-    { key = "locked",       text = "optLocked" },
+    { key = "healersInCombat", text = "optHealersInCombat" },
+    { key = "hideInCombat",    text = "optHideInCombat" },
+    { key = "summary",         text = "optSummary" },
+    { key = "showSelf",        text = "optShowSelf" },
+    { key = "showUnknown",     text = "optShowUnknown" },
+    { key = "specIcons",       text = "optSpecIcons" },
+    { key = "locked",          text = "optLocked" },
 }
 
 local PRESETS = {
-    { text = "optHealers", mode = "default" },
     { text = "optAll",     mode = "all" },
+    { text = "optHealers", mode = "healers" },
     { text = "optNone",    mode = "none" },
 }
 
@@ -242,7 +243,7 @@ local function Create()
     hint:SetWidth(width - PAD * 2)
     hint:SetWordWrap(true)
     Localize(hint, "optHint")
-    y = y - 40
+    y = y - 48
 
     win:SetSize(width, -y)
 

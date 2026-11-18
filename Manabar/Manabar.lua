@@ -2,9 +2,10 @@
 Manabar - mana bars for WoW Forever
 (Interface 16001, runs on the Midnight-based Mainline client)
 
-One bar per selected class/spec in your party or raid (by default: the
-healers): the player's name, the mana percentage and a "drinking" indicator.
-The bar color follows the mana: 100% green -> 50% yellow -> 0% red. An optional
+One bar per selected class/spec in your party or raid (by default: all mana
+users out of combat with healers listed first, and only healers in combat):
+the player's name, the mana percentage and a "drinking" indicator. The bar
+color follows the mana: 100% green -> 50% yellow -> 0% red. An optional
 summary bar at the bottom shows the average. The frame can be dragged while
 unlocked; the gear icon (or /manabar) opens the settings window (Options.lua).
 
@@ -26,17 +27,18 @@ ns = ns or {}
 -------------------------------------------------------------------------------
 
 local DEFAULTS = {
-    locked       = false,
-    scale        = 1,
-    width        = 180,
-    height       = 18,
-    showSelf     = true,  -- your own bar too (if your spec is selected)
-    hideInCombat = false, -- only show the frame out of combat
-    summary      = true,  -- average bar at the bottom (shown with 2+ bars)
-    showUnknown  = false, -- show players whose spec is not known yet (when it matters)
-    specIcons    = true,  -- spec icon at the start of each bar
-    lang         = "hu",
-    debug        = false,
+    locked          = false,
+    scale           = 1,
+    width           = 180,
+    height          = 18,
+    showSelf        = true,  -- your own bar too (if your spec is selected)
+    healersInCombat = true,  -- narrow to healers only while in combat
+    hideInCombat    = false, -- only show the frame out of combat
+    summary         = true,  -- average bar at the bottom (shown with 2+ bars)
+    showUnknown     = false, -- show players whose spec is not known yet (when it matters)
+    specIcons       = true,  -- spec icon at the start of each bar
+    lang            = "hu",
+    debug           = false,
 }
 
 -- Bar color by mana: { fraction, r, g, b }. 0% red -> 50% yellow -> 100% green.
@@ -345,13 +347,21 @@ local function BuildSpecData()
     end
 end
 
--- A spec is shown when the player ticked it; untouched specs default to the
--- healer specializations.
+-- A spec is shown when the player ticked it; untouched specs default to all
+-- mana users.
 local function IsSpecEnabled(specID)
     local v = db.specs[specID]
     if v ~= nil then return v == true end
-    local spec = specInfoByID[specID]
-    return spec ~= nil and spec.role == "HEALER"
+    return specInfoByID[specID] ~= nil
+end
+
+local function IsSpecShownIn(specID, combat)
+    if not IsSpecEnabled(specID) then return false end
+    if combat and db.healersInCombat then
+        local spec = specInfoByID[specID]
+        return spec ~= nil and spec.role == "HEALER"
+    end
+    return true
 end
 
 -- Maps a spec ID from any API to the spec entry of the class. An ID the class
@@ -401,12 +411,31 @@ end
 local ScheduleRebuild -- defined with the frames
 local ProcessInspectQueue
 
-local function QueueInspect(guid)
-    if not guid or specCache[guid] or inspectQueued[guid] then return end
+local function QueueInspect(guid, urgent)
+    if not guid or specCache[guid] or guid == inspectPending then return end
+    if inspectQueued[guid] then
+        if urgent and inspectQueued[guid] ~= "urgent" then
+            inspectQueued[guid] = "urgent"
+        end
+        return
+    end
     local failedAt = inspectFailedAt[guid]
     if failedAt and Now() - failedAt < INSPECT_RETRY then return end
-    inspectQueued[guid] = true
+    inspectQueued[guid] = urgent and "urgent" or "normal"
     inspectQueue[#inspectQueue + 1] = guid
+end
+
+local function PopInspect()
+    local pick = 1
+    for i = 1, #inspectQueue do
+        if inspectQueued[inspectQueue[i]] == "urgent" then
+            pick = i
+            break
+        end
+    end
+    local guid = table.remove(inspectQueue, pick)
+    inspectQueued[guid] = nil
+    return guid
 end
 
 local function ScheduleInspect()
@@ -450,8 +479,7 @@ ProcessInspectQueue = function()
     end
     if not inCombat and not Plain(Call(InCombatLockdown)) and not InspectFrameOpen() then
         while #inspectQueue > 0 do
-            local guid = table.remove(inspectQueue, 1)
-            inspectQueued[guid] = nil
+            local guid = PopInspect()
             local unit = guidToUnit[guid]
             if unit and not specCache[guid] then
                 if CanInspectNow(unit) then
@@ -519,23 +547,24 @@ local function CandidateSpecs(specs, role)
     return specs
 end
 
--- Decides by class AND spec. Returns: show, spec (entry or nil), specUnknown,
--- needsInspect.
+-- Decides by class, spec and combat state. Returns: show, spec (entry or nil),
+-- specUnknown, isHealer, inspect ("urgent", "icon" or nil).
 --   1. manual lists (/manabar add / ignore)
---   2. known spec (yours, or inspected): exactly the ticked specs
+--   2. known spec (yours, or inspected): ticked specs (and healers only in
+--      combat when healersInCombat is on)
 --   3. spec unknown: the group role narrows the class's specs down; one left =
---      that is the spec. If all candidates are ticked (or none), the answer is
---      clear anyway. Otherwise the player is hidden (unless "show unknown" is
---      on) until a short inspection tells the spec.
+--      that is the spec. If all candidates agree, the answer is clear anyway.
+--      Otherwise the player is hidden (unless "show unknown" is on) until a
+--      short inspection tells the spec.
 local function Evaluate(unit, isSelf, name, guid)
     local key = name and name:lower()
-    if key and db.exclude[key] then return false, nil, false, false end
+    if key and db.exclude[key] then return false, nil, false, false, nil end
     local forced = (key and db.include[key]) and true or false
 
     local _, classFile = Call(UnitClass, unit)
     classFile = Plain(classFile)
     local specs = classFile and specsByClass[classFile]
-    if not specs then return forced, nil, false, false end
+    if not specs then return forced, nil, false, false, nil end
 
     local spec = KnownSpec(unit, isSelf, guid, specs)
     local candidates
@@ -543,17 +572,33 @@ local function Evaluate(unit, isSelf, name, guid)
         candidates = CandidateSpecs(specs, Plain(Call(UnitGroupRolesAssigned, unit)))
         if #candidates == 1 then spec = candidates[1] end
     end
-    if spec then return forced or IsSpecEnabled(spec.id), spec, false, false end
+    if spec then
+        return forced or IsSpecShownIn(spec.id, inCombat), spec, false, spec.role == "HEALER", nil
+    end
 
     local anyOn, anyOff = false, false
+    local anyHealer, anyNonHealer = false, false
+    local anyCombatOn, anyCombatOff = false, false
     for i = 1, #candidates do
-        if IsSpecEnabled(candidates[i].id) then anyOn = true else anyOff = true end
+        local c = candidates[i]
+        if IsSpecShownIn(c.id, inCombat) then anyOn = true else anyOff = true end
+        if c.role == "HEALER" then anyHealer = true else anyNonHealer = true end
+        if IsSpecShownIn(c.id, true) then anyCombatOn = true else anyCombatOff = true end
     end
     local ambiguous = anyOn and anyOff
     local show = forced or (anyOn and (not anyOff or db.showUnknown))
-    -- Inspect when the spec decides, or to show the spec icon of a shown bar.
-    local needsInspect = not isSelf and (ambiguous or (show and db.specIcons))
-    return show, nil, true, needsInspect
+    local isHealer = anyHealer and not anyNonHealer
+    -- Inspect urgently when the spec decides visibility (now or in combat) or
+    -- healer sorting; otherwise only to fetch the spec icon of a shown bar.
+    local inspect
+    if not isSelf then
+        if ambiguous or (anyCombatOn and anyCombatOff) or (show and anyHealer and anyNonHealer) then
+            inspect = "urgent"
+        elseif show and db.specIcons then
+            inspect = "icon"
+        end
+    end
+    return show, nil, true, isHealer, inspect
 end
 
 local function GetGroupUnits(out)
@@ -576,6 +621,7 @@ local function GetGroupUnits(out)
 end
 
 local function SortEntries(a, b)
+    if a.isHealer ~= b.isHealer then return a.isHealer end
     if a.isSelf ~= b.isSelf then return a.isSelf end
     local an, bn = a.name, b.name
     if an and bn then
@@ -598,13 +644,14 @@ local function CollectUnits()
             local isSelf = IsSelfUnit(unit, guid)
             if not isSelf or db.showSelf then
                 local name = Plain((Call(UnitName, unit)))
-                local show, spec, specUnknown, needsInspect = Evaluate(unit, isSelf, name, guid)
+                local show, spec, specUnknown, isHealer, inspect = Evaluate(unit, isSelf, name, guid)
                 if show then
                     list[#list + 1] = {
-                        unit = unit, name = name, isSelf = isSelf, spec = spec, specUnknown = specUnknown,
+                        unit = unit, name = name, isSelf = isSelf, spec = spec,
+                        specUnknown = specUnknown, isHealer = isHealer,
                     }
                 end
-                if needsInspect then QueueInspect(guid) end
+                if inspect then QueueInspect(guid, inspect == "urgent") end
             end
         end
     end
@@ -1183,7 +1230,7 @@ local function SetOption(key, value)
     elseif key == "summary" then
         Layout()
         UpdateSummary()
-    elseif key == "showSelf" or key == "showUnknown" or key == "specIcons" then
+    elseif key == "showSelf" or key == "showUnknown" or key == "specIcons" or key == "healersInCombat" then
         ScheduleRebuild()
     end
 end
@@ -1205,13 +1252,15 @@ local function ToggleClass(classFile)
     ScheduleRebuild()
 end
 
--- mode: "default" (healer specs), "all" or "none"
+-- mode: "all" (default: all mana users), "healers" or "none"
 local function SetAllSpecs(mode)
-    for id in pairs(specInfoByID) do
-        if mode == "default" then
+    for id, spec in pairs(specInfoByID) do
+        if mode == "all" then
             db.specs[id] = nil
+        elseif mode == "healers" then
+            db.specs[id] = (spec.role == "HEALER")
         else
-            db.specs[id] = (mode == "all")
+            db.specs[id] = false
         end
     end
     ScheduleRebuild()
@@ -1316,6 +1365,8 @@ local function HandleSlash(msg)
     elseif cmd == "height" then
         local v = SetNumber("height", rest, 12, 40, true)
         if v then Print(L.height, v) end
+    elseif cmd == "healers" then
+        ToggleOption("healersInCombat", L.optHealersInCombat)
     elseif cmd == "combat" then
         ToggleOption("hideInCombat", L.optHideInCombat)
     elseif cmd == "summary" then
@@ -1438,9 +1489,8 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
         OnInspectReady(arg1)
     elseif kind == "combat" then
         inCombat = (event == "PLAYER_REGEN_DISABLED")
-        UpdateVisibility()
+        Rebuild()
         if not inCombat then
-            ScheduleRebuild()
             ScheduleInspect()
         end
     end
