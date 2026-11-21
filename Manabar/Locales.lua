@@ -42,6 +42,7 @@ ns.STRINGS = {
 
         optTitle        = "Manabar - beállítások",
         optDisplay      = "Megjelenítés",
+        optHealersInCombat = "Harc közben csak a healerek látszanak",
         optHideInCombat = "Csak harcon kívül látszik",
         optRoleHeaders  = "Szerep fejlécek, bennük a szerep átlag manájával",
         optSummary      = "Teljes átlag bar a lista alján (ha több szerep látszik)",
@@ -54,7 +55,8 @@ ns.STRINGS = {
         roleDamager     = "DPS",
         roleTank        = "Tank",
         roleUnknown     = "Ismeretlen",
-        optHint         = "A szerepet a csapatban beállított szerep adja; ha nincs ilyen, a spec alapján dönt "
+        optHint         = "A healerek mindig a lista elején vannak. "
+            .. "A szerepet a csapatban beállított szerep adja; ha nincs ilyen, a spec alapján dönt "
             .. "(ezt egy rövid inspect deríti ki, csak harcon kívül). Warrior és Rogue nem jelenik meg, mert nincs "
             .. "manájuk. Ha a játék nem engedi olvasni a mana értékét, az átlagot szám nélkül, a bar hossza és "
             .. "színe mutatja.",
@@ -66,6 +68,7 @@ ns.STRINGS = {
             "  reset - pozíció és méret visszaállítása",
             "  scale <0.5-3> - méretarány",
             "  width <100-400> | height <12-40> - bar mérete",
+            "  healers - harc közben csak a healerek be/ki",
             "  combat - csak harcon kívül látszik be/ki",
             "  headers - szerep fejlécek (átlaggal) be/ki",
             "  summary - teljes átlag bar a lista alján be/ki",
@@ -116,6 +119,7 @@ ns.STRINGS = {
 
         optTitle        = "Manabar - settings",
         optDisplay      = "Display",
+        optHealersInCombat = "Only show healers in combat",
         optHideInCombat = "Only show out of combat",
         optRoleHeaders  = "Role headers, with the role's average mana",
         optSummary      = "Overall average bar at the bottom (with more than one role)",
@@ -128,7 +132,8 @@ ns.STRINGS = {
         roleDamager     = "DPS",
         roleTank        = "Tank",
         roleUnknown     = "Unknown",
-        optHint         = "The role is the one set in the group; without one, the spec decides (found out by a "
+        optHint         = "Healers are always listed first. "
+            .. "The role is the one set in the group; without one, the spec decides (found out by a "
             .. "short inspect, out of combat only). Warriors and Rogues are never shown: they have no mana. If the "
             .. "game does not let addons read the mana values, the average is shown without a number, by the bar's "
             .. "length and color.",
@@ -140,6 +145,7 @@ ns.STRINGS = {
             "  reset - reset position and size",
             "  scale <0.5-3> - scale",
             "  width <100-400> | height <12-40> - bar size",
+            "  healers - only show healers in combat on/off",
             "  combat - only show out of combat on/off",
             "  headers - role headers (with their average) on/off",
             "  summary - overall average bar at the bottom on/off",

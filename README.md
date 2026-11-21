@@ -1,7 +1,8 @@
 # Manabar
 
-WoW Forever addon (Interface 16001), ami a csapatod healereinek – vagy a kiválasztott
-szerepű (Healer / DPS / Tank) játékosoknak – a manáját mutatja egy-egy baron.
+WoW Forever addon (Interface 16001), ami a csapatod manahasználóinak a manáját
+mutatja egy-egy baron, szerep szerint csoportosítva (a healerek mindig elöl).
+Alapból harcon kívül mindenki látszik, harc közben csak a healerek.
 
 ## Mit tud
 
@@ -9,6 +10,9 @@ szerepű (Healer / DPS / Tank) játékosoknak – a manáját mutatja egy-egy ba
 - **Ivás jelzése**: ha valaki iszik (Drink buff), egy pohár ikon és az „Iszik” felirat
   jelenik meg a baron.
 - **Színátmenet**: 100%-on zöld, 50%-on sárga, 0%-on piros, közte folyamatos átmenet.
+- **Harcon kívül minden manahasználó, harcban csak a healerek**: alapból mindhárom
+  szerep (Healer, DPS, Tank) be van pipálva; amint harcba lépsz, a lista a healerekre
+  szűkül, harc után pedig visszaáll. Ez a beállításokban kikapcsolható.
 - **Szerep fejlécek**: a barok szerep szerint csoportosítva jelennek meg (Healer, DPS,
   Tank, Ismeretlen), mindegyik csoport fölött egy fejléccel: szerep-ikon, név, létszám
   és **a csoport átlag manája**. Ha a játék elrejti a mana értékét (WoW Forever-ben ez a
@@ -20,6 +24,7 @@ szerepű (Healer / DPS / Tank) játékosoknak – a manáját mutatja egy-egy ba
 - **Mozgatható**: feloldott állapotban bal egérgombbal húzható. Rögzítés: jobb klikk
   az ablakon vagy `/manabar lock`.
 - **Beállítások ablak** a fogaskerék ikonra kattintva (vagy `/manabar`):
+  - harc közben csak a healerek látszanak (alapból be)
   - csak harcon kívül látszik
   - szerep fejlécek (átlaggal)
   - teljes átlag bar a lista alján
@@ -28,7 +33,7 @@ szerepű (Healer / DPS / Tank) játékosoknak – a manáját mutatja egy-egy ba
   - spec ikon a bar elején
   - ablak rögzítése
   - **kinek a manáját mutassa**: szerep szerint – **Healer**, **DPS**, **Tank**
-    (bármelyik kombináció). Alapból csak a Healer van bepipálva.
+    (bármelyik kombináció). Alapból mindhárom be van pipálva.
 - Offline / halott állapot szürke barral („Offline”, „Halott”).
 - Magyar és angol felület (`/manabar lang hu` / `/manabar lang en`).
 
@@ -58,6 +63,7 @@ Első indításkor az ablak feloldva, középen jelenik meg: húzd a helyére, m
 | `/manabar reset` | pozíció és méret visszaállítása |
 | `/manabar scale 1.2` | méretarány (0.5 – 3, tizedesvessző is jó) |
 | `/manabar width 220` / `height 20` | bar szélesség (100 – 400) / magasság (12 – 40) |
+| `/manabar healers` | harc közben csak a healerek be/ki |
 | `/manabar combat` | csak harcon kívül látszik be/ki |
 | `/manabar headers` | szerep fejlécek (átlaggal) be/ki |
 | `/manabar summary` | teljes átlag bar a lista alján be/ki |
@@ -79,9 +85,12 @@ A szűrés a játékos szerepe szerint történik (Healer / DPS / Tank):
 2. Csak manát használó kasztok jelenhetnek meg: Warrior és Rogue soha (akkor sem, ha a
    Tank vagy a DPS be van pipálva).
 3. A szerep az, amit a csapatban beállítottak (csoportkereső / szerepválasztás).
+   Harc közben – ha a „Harc közben csak a healerek látszanak” opció be van kapcsolva –
+   a kipipált szerepekből csak a Healer marad.
 4. Ha nincs beállított szerep, a spec szerepe dönt: a sajátod mindig ismert, másokét egy
    rövid **inspect** deríti ki (csak harcon kívül, legfeljebb 2 másodpercenként egy
-   játékos). Ha a kaszt minden specje ugyanazt a választ adja (pl. a Mage mindig DPS),
+   játékos; előbb azok, akiknél a szerep dönti el, látszanak-e). Ha a kaszt minden
+   specje ugyanazt a választ adja (pl. a Mage mindig DPS),
    inspect sem kell. Amíg nem derül ki, az illető **rejtve marad** – ha inkább azonnal
    látni szeretnéd, kapcsold be az „Akinek még nem ismert a szerepe, az is látszik”
    opciót; ilyenkor kérdőjel ikon jelzi, hogy még nem biztos.
@@ -125,9 +134,10 @@ Fájlok: `Manabar/Locales.lua` (szövegek), `Manabar/Manabar.lua` (barok, logika
 
 ---
 
-**English:** Manabar shows the mana of the healers (or any class/spec combination you
-select) in your WoW Forever party or raid: name, mana %, a drinking indicator, a
-red → yellow → green color gradient and an optional average bar. Drag it while
+**English:** Manabar shows the mana of your WoW Forever party or raid, grouped by role
+(healers always first): by default every mana user out of combat and only the healers
+in combat. Each bar has the name, mana %, a drinking indicator and a red → yellow →
+green color gradient; each role header shows the role's average mana. Drag it while
 unlocked, click the gear icon (or type `/manabar`) for the settings, and use
 `/manabar lang en` for English texts. Install by copying the `Manabar` folder into
 `World of Warcraft\_forever_\Interface\AddOns\`.

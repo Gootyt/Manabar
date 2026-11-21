@@ -1,7 +1,7 @@
 ## Interface: 16001
 ## Title: Manabar
-## Notes: Mana bars for the healers, DPS or tanks of your group (you pick the roles): name, mana %, drinking indicator, role headers with their average. Movable.
-## Version: 1.6.0
+## Notes: Mana bars for your group by role, healers first (every mana user out of combat, healers only in combat by default): name, mana %, drinking indicator, role headers with their average. Movable.
+## Version: 1.7.0
 ## IconTexture: Interface\Icons\INV_Drink_07
 ## SavedVariables: ManabarDB
 

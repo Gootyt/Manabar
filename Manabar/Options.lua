@@ -27,6 +27,7 @@ local ROLES = {
 
 -- Display options: SavedVariables key + text key.
 local OPTIONS = {
+    { key = "healersInCombat", text = "optHealersInCombat" },
     { key = "hideInCombat", text = "optHideInCombat" },
     { key = "roleHeaders",  text = "optRoleHeaders" },
     { key = "summary",      text = "optSummary" },
@@ -176,7 +177,7 @@ local function Create()
     hint:SetWidth(WIDTH - PAD * 2)
     hint:SetWordWrap(true)
     Localize(hint, "optHint")
-    y = y - 60
+    y = y - 72
 
     win:SetSize(WIDTH, -y)
 

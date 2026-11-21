@@ -67,11 +67,19 @@ local function partyNoRole(spec)
     return members
 end
 
+-- opts.db = false: a first run. Otherwise most tests pin the list to the
+-- healers, in and out of combat; opts.realDefaults keeps the addon's defaults
+-- (every mana user out of combat, only healers in combat).
 local function start(opts)
     opts = opts or {}
     M.install(opts)
     if opts.db ~= false then
-        ManabarDB = opts.db or { welcomed = true, debug = true }
+        local db = opts.db or { welcomed = true, debug = true }
+        if not opts.realDefaults then
+            if db.roles == nil then db.roles = { HEALER = true, DAMAGER = false, TANK = false } end
+            if db.healersInCombat == nil then db.healersInCombat = false end
+        end
+        ManabarDB = db
     end
     if opts.group then M.setGroup(opts.group, opts.members or party5()) end
     local ns = M.loadAddon(ADDON_DIR)
@@ -627,11 +635,12 @@ test("visual average follows the group: segments are reused", function()
 end)
 
 test("options window: opens with /manabar and the gear, reflects and changes settings", function()
-    local ns = start({ group = "party" })
+    local ns = start({ group = "party", realDefaults = true })
     local win = openOptions(ns)
     truthy(roleCheck(ns, "HEALER"):GetChecked(), "Healer on by default")
-    falsy(roleCheck(ns, "DAMAGER"):GetChecked(), "DPS off by default")
-    falsy(roleCheck(ns, "TANK"):GetChecked(), "Tank off by default")
+    truthy(roleCheck(ns, "DAMAGER"):GetChecked(), "DPS on by default")
+    truthy(roleCheck(ns, "TANK"):GetChecked(), "Tank on by default")
+    truthy(optionCheck(ns, "healersInCombat"):GetChecked(), "healers only in combat by default")
     local _, _, roleChecks = ns.GetOptionsFrame()
     eq(#roleChecks, 3, "three roles")
     eq(roleCheck(ns, "HEALER").label.__text, "Healer", "label")
@@ -770,11 +779,77 @@ test("unticking Healer hides the healers, you included", function()
 end)
 
 test("settings of the old class / spec filter are dropped", function()
-    local ns = start({ group = "party", db = { welcomed = true, specs = { [64] = true, [257] = false } } })
+    local ns = start({ group = "party", realDefaults = true,
+        db = { welcomed = true, specs = { [64] = true, [257] = false } } })
     eq(ManabarDB.specs, nil, "old setting removed")
     eq(ManabarDB.roles.HEALER, true, "healers by default")
-    eq(ManabarDB.roles.DAMAGER, false, "no dps by default")
-    eq(names(ns), "Myra,Fern,Thalia", "healers")
+    eq(ManabarDB.roles.DAMAGER, true, "dps by default")
+    eq(ManabarDB.healersInCombat, true, "healers only in combat by default")
+    eq(names(ns), "Myra,Fern,Thalia,Zed", "every mana user out of combat")
+end)
+
+test("defaults: every mana user out of combat (healers first), only the healers in combat", function()
+    local members = party5()
+    members[3] = { name = "Bulwark", class = "PALADIN", role = "TANK", spec = 66, mana = 5000, maxMana = 10000 }
+    local ns = start({ group = "party", members = members, realDefaults = true })
+    eq(names(ns), "Myra,Fern,Thalia,Zed,Bulwark", "healers, dps, tank")
+    truthy(ns.GetSummaryBar():IsShown(), "overall average with several roles")
+    M.setCombat(true)
+    eq(names(ns), "Myra,Fern,Thalia", "only the healers, at once")
+    falsy(ns.GetHeader("DAMAGER"):IsShown(), "no dps header in combat")
+    falsy(ns.GetSummaryBar():IsShown(), "no overall average with one role")
+    M.setCombat(false)
+    eq(names(ns), "Myra,Fern,Thalia,Zed,Bulwark", "everyone again after the fight")
+    noDebugErrors()
+end)
+
+test("'healers in combat' option: checkbox and /manabar healers", function()
+    local ns = start({ group = "party", realDefaults = true })
+    openOptions(ns)
+    M.click(optionCheck(ns, "healersInCombat"))
+    eq(ManabarDB.healersInCombat, false, "saved")
+    M.setCombat(true)
+    M.run(0.3)
+    eq(names(ns), "Myra,Fern,Thalia,Zed", "everyone stays in combat")
+    slash("healers")
+    eq(ManabarDB.healersInCombat, true, "slash toggle")
+    truthy(optionCheck(ns, "healersInCombat"):GetChecked(), "checkbox follows")
+    M.run(0.3)
+    eq(names(ns), "Myra,Fern,Thalia", "healers only, applied at once in combat")
+end)
+
+test("healers stay first, even when you are dps", function()
+    local members = party5()
+    members[1].role = "DAMAGER"
+    members[1].spec = 258 -- you: Shadow Priest
+    members[5].name = "Aaron" -- an alphabetically early mage
+    local ns = start({ group = "party", members = members, realDefaults = true })
+    eq(names(ns), "Fern,Thalia,Myra,Aaron", "healers, then you, then the other dps")
+end)
+
+test("inspections that decide where a player belongs go before icon-only ones", function()
+    local members = party5()
+    members[4], members[5] = members[5], members[4] -- Zed is party3, Fern party4
+    members[5].role = "NONE"
+    members[5].spec = 102 -- Fern: druid without role
+    local ns = start({ group = "party", members = members, realDefaults = true })
+    M.run(5)
+    eq(table.concat(M.inspectRequests, ","), "Fern,Zed", "the role-less druid first, the icon later")
+    eq(names(ns), "Myra,Thalia,Fern,Zed", "Balance: in the dps group (sorted by name)")
+end)
+
+test("locked, healers in combat: a group without healers hides in combat", function()
+    local members = {
+        { name = "Myra", class = "MAGE", role = "DAMAGER", mana = 5000, maxMana = 10000, isPlayer = true },
+        { name = "Zed", class = "WARLOCK", role = "DAMAGER", mana = 7000, maxMana = 10000 },
+    }
+    local ns = start({ group = "party", members = members, realDefaults = true,
+        db = { welcomed = true, debug = true, locked = true } })
+    truthy(ManabarFrame:IsShown(), "dps shown out of combat")
+    M.setCombat(true)
+    falsy(ManabarFrame:IsShown(), "no healers in combat: hidden")
+    M.setCombat(false)
+    truthy(ManabarFrame:IsShown(), "back after the fight")
 end)
 
 test("spec icons can be turned off", function()

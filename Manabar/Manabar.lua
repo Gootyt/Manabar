@@ -2,9 +2,10 @@
 Manabar - mana bars for WoW Forever
 (Interface 16001, runs on the Midnight-based Mainline client)
 
-One bar per player of the selected group roles (healer / dps / tank; by
-default the healers) in your party or raid: the player's name, the mana
-percentage and a "drinking" indicator.
+One bar per player of the selected group roles (healer / dps / tank) in your
+party or raid, grouped by role with the healers first. By default every mana
+user is shown out of combat and only the healers in combat. Each bar shows the
+player's name, the mana percentage and a "drinking" indicator.
 The bar color follows the mana: 100% green -> 50% yellow -> 0% red. An optional
 summary bar at the bottom shows the average. The frame can be dragged while
 unlocked; the gear icon (or /manabar) opens the settings window (Options.lua).
@@ -31,7 +32,8 @@ local DEFAULTS = {
     scale        = 1,
     width        = 180,
     height       = 18,
-    showSelf     = true,  -- your own bar too (if your spec is selected)
+    showSelf     = true,  -- your own bar too (if your role is selected)
+    healersInCombat = true, -- narrow the list to the healers while in combat
     hideInCombat = false, -- only show the frame out of combat
     roleHeaders  = true,  -- a header per role, with the role's average mana
     summary      = true,  -- overall average at the bottom (when it adds something)
@@ -376,10 +378,18 @@ local function BuildSpecData()
 end
 
 -- The group roles whose mana is shown (settings window: Healer / DPS / Tank).
-local DEFAULT_ROLES = { HEALER = true, DAMAGER = false, TANK = false }
+-- By default every mana user out of combat; healersInCombat narrows it down.
+local DEFAULT_ROLES = { HEALER = true, DAMAGER = true, TANK = true }
 
 local function IsRoleEnabled(role)
     return db.roles[role] == true
+end
+
+-- Shown right now: ticked, and in combat a healer if "healers in combat" is on.
+local function IsRoleShown(role)
+    if not IsRoleEnabled(role) then return false end
+    if inCombat and db.healersInCombat then return role == "HEALER" end
+    return true
 end
 
 -- Maps a spec ID from any API to the spec entry of the class. An ID the class
@@ -429,12 +439,31 @@ end
 local ScheduleRebuild -- defined with the frames
 local ProcessInspectQueue
 
-local function QueueInspect(guid)
-    if not guid or specCache[guid] or inspectQueued[guid] then return end
+-- urgent: the spec decides whether / where the player is shown; otherwise it
+-- is only wanted for the spec icon. Urgent requests go first.
+local function QueueInspect(guid, urgent)
+    if not guid or specCache[guid] or guid == inspectPending then return end
+    if inspectQueued[guid] then
+        if urgent then inspectQueued[guid] = "urgent" end
+        return
+    end
     local failedAt = inspectFailedAt[guid]
     if failedAt and Now() - failedAt < INSPECT_RETRY then return end
-    inspectQueued[guid] = true
+    inspectQueued[guid] = urgent and "urgent" or "icon"
     inspectQueue[#inspectQueue + 1] = guid
+end
+
+local function PopInspect()
+    local pick = 1
+    for i = 1, #inspectQueue do
+        if inspectQueued[inspectQueue[i]] == "urgent" then
+            pick = i
+            break
+        end
+    end
+    local guid = table.remove(inspectQueue, pick)
+    inspectQueued[guid] = nil
+    return guid
 end
 
 local function ScheduleInspect()
@@ -478,8 +507,7 @@ ProcessInspectQueue = function()
     end
     if not inCombat and not Plain(Call(InCombatLockdown)) and not InspectFrameOpen() then
         while #inspectQueue > 0 do
-            local guid = table.remove(inspectQueue, 1)
-            inspectQueued[guid] = nil
+            local guid = PopInspect()
             local unit = guidToUnit[guid]
             if unit and not specCache[guid] then
                 if CanInspectNow(unit) then
@@ -576,7 +604,7 @@ local function CandidateSpecs(specs, role)
 end
 
 -- Decides by group role. Returns: show, spec (for the icon, or nil),
--- specUnknown, needsInspect.
+-- specUnknown, inspect ("urgent", "icon" or nil), role.
 --   1. manual lists (/manabar add / ignore)
 --   2. only classes that use mana (no bars for Warriors and Rogues)
 --   3. the role set in the group (tank / healer / dps); without one, the role
@@ -584,14 +612,15 @@ end
 --   4. role still unknown: if every spec of the class gives the same answer,
 --      that decides (a Mage is always dps). Otherwise the player is hidden
 --      (unless "show unknown" is on) until the inspection tells the spec.
+--   In combat only the healers stay when "healers in combat" is on.
 local function Evaluate(unit, guid, identity)
     local isSelf, name = identity.isSelf, identity.name
     local key = name and name:lower()
-    if key and db.exclude[key] then return false, nil, false, false end
+    if key and db.exclude[key] then return false, nil, false, nil, nil end
     local forced = (key and db.include[key]) and true or false
 
     local specs = specsByClass[identity.classFile]
-    if not specs then return forced, nil, false, false end
+    if not specs then return forced, nil, false, nil, nil end
 
     local spec = KnownSpec(unit, isSelf, guid, specs)
     if spec then
@@ -620,17 +649,18 @@ local function Evaluate(unit, guid, identity)
     local wantIcon = not isSelf and db.specIcons and spec == nil
 
     if role then
-        local show = forced or IsRoleEnabled(role)
-        return show, spec, spec == nil, show and wantIcon, role
+        local show = forced or IsRoleShown(role)
+        return show, spec, spec == nil, (show and wantIcon) and "icon" or nil, role
     end
 
     local anyOn, anyOff = false, false
     for i = 1, #specs do
-        if IsRoleEnabled(specs[i].role) then anyOn = true else anyOff = true end
+        if IsRoleShown(specs[i].role) then anyOn = true else anyOff = true end
     end
     local show = forced or (anyOn and (not anyOff or db.showUnknown))
-    local needsInspect = not isSelf and ((anyOn and anyOff) or (show and wantIcon))
-    return show, spec, spec == nil, needsInspect, nil
+    -- The role decides whether and in which group the player is shown: urgent.
+    local inspect = (not isSelf and ((anyOn and anyOff) or show)) and "urgent" or nil
+    return show, spec, spec == nil, inspect, nil
 end
 
 local function GetGroupUnits(out)
@@ -676,14 +706,14 @@ local function CollectUnits()
             if guid then guidToUnit[guid] = unit end
             local identity = UnitIdentity(unit, guid)
             if identity and (not identity.isSelf or db.showSelf) then
-                local show, spec, specUnknown, needsInspect, role = Evaluate(unit, guid, identity)
+                local show, spec, specUnknown, inspect, role = Evaluate(unit, guid, identity)
                 if show then
                     list[#list + 1] = {
                         unit = unit, name = identity.name, isSelf = identity.isSelf,
                         spec = spec, specUnknown = specUnknown, role = role,
                     }
                 end
-                if needsInspect then QueueInspect(guid) end
+                if inspect then QueueInspect(guid, inspect == "urgent") end
             end
         end
     end
@@ -1486,7 +1516,7 @@ local function SetOption(key, value)
     elseif key == "summary" or key == "roleHeaders" then
         Layout()
         UpdateAverages()
-    elseif key == "showSelf" or key == "showUnknown" or key == "specIcons" then
+    elseif key == "showSelf" or key == "showUnknown" or key == "specIcons" or key == "healersInCombat" then
         ScheduleRebuild(true)
     end
 end
@@ -1638,6 +1668,8 @@ local function HandleSlash(msg)
     elseif cmd == "height" then
         local v = SetNumber("height", rest, 12, 40, true)
         if v then Print(L.height, v) end
+    elseif cmd == "healers" then
+        ToggleOption("healersInCombat", L.optHealersInCombat)
     elseif cmd == "combat" then
         ToggleOption("hideInCombat", L.optHideInCombat)
     elseif cmd == "summary" then
@@ -1768,12 +1800,11 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
     elseif kind == "inspect" then
         OnInspectReady(arg1)
     elseif kind == "combat" then
+        -- Rebuild at once: "healers in combat" changes the list (remembered
+        -- identities keep it working while the game hides names in a fight).
         inCombat = (event == "PLAYER_REGEN_DISABLED")
-        UpdateVisibility()
-        if not inCombat then
-            ScheduleRebuild()
-            ScheduleInspect()
-        end
+        Rebuild()
+        if not inCombat then ScheduleInspect() end
     end
 end)
 eventFrame:RegisterEvent("ADDON_LOADED")
