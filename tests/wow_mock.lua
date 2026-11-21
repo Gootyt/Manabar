@@ -249,6 +249,11 @@ method(Frame, "SetFrameStrata", function(self, strata)
     self.__strata = strata
 end)
 method(Frame, "SetFrameLevel", function(self, level) checknum(level, "level"); self.__level = level end)
+method(Frame, "GetFrameLevel", function(self)
+    if self.__level then return self.__level end
+    if self.__parent and self.__parent.GetFrameLevel then return self.__parent:GetFrameLevel() + 1 end
+    return 0
+end)
 method(Frame, "StartMoving", function(self)
     if not self.__movable then error("StartMoving(): frame is not movable", 2) end
     self.__moving = true
@@ -404,6 +409,17 @@ method(Texture, "SetVertexColor", function(self, r, g, b, a)
     checknum(g, "g")
     checknum(b, "b")
     self.__color = { r, g, b, a or 1 }
+end)
+local BLEND_MODES = { DISABLE = true, BLEND = true, ALPHAKEY = true, ADD = true, MOD = true }
+method(Texture, "SetBlendMode", function(self, mode)
+    if not BLEND_MODES[mode] then error("SetBlendMode(): invalid mode " .. tostring(mode), 2) end
+    self.__blend = mode
+end)
+method(Texture, "SetColorTexture", function(self, r, g, b, a)
+    checknum(r, "r")
+    checknum(g, "g")
+    checknum(b, "b")
+    self.__colorTexture = { r, g, b, a or 1 }
 end)
 method(Texture, "GetVertexColor", function(self)
     local c = self.__color or { 1, 1, 1, 1 }

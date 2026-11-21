@@ -10,7 +10,9 @@ kiválasztott kaszt/spec kombinációnak – a manáját mutatja egy-egy baron.
   jelenik meg a baron.
 - **Színátmenet**: 100%-on zöld, 50%-on sárga, 0%-on piros, közte folyamatos átmenet.
 - **Átlag bar** a lista alján (kikapcsolható): a mutatott barok átlagos manája.
-  Csak akkor jelenik meg, ha legalább két bar látszik.
+  Csak akkor jelenik meg, ha legalább két bar látszik. Ha a játék elrejti a mana
+  értékét (WoW Forever-ben ez a megszokott), szám nélkül, a bar hosszával és színével
+  mutatja az átlagot; a 25 / 50 / 75%-os jelek segítenek leolvasni.
 - **Mozgatható**: feloldott állapotban bal egérgombbal húzható. Rögzítés: jobb klikk
   az ablakon vagy `/manabar lock`.
 - **Beállítások ablak** a fogaskerék ikonra kattintva (vagy `/manabar`):
@@ -88,10 +90,13 @@ A WoW Forever a Midnight kliensre épül, így az addonokra ugyanazok a szabály
 vonatkoznak: harc közben a játék a többi játékos adatait (pl. manáját) „titkosított”
 értékként adhatja át, amivel addon nem számolhat.
 
-- A **barok harc közben is működnek**: a %-ot és a színt a játék saját, erre szolgáló
+- A **barok működnek**: a %-ot és a színt a játék saját, erre szolgáló
   curve-függvényei számolják ki, az addon csak továbbadja őket a kijelzőnek.
-- Az **átlag** viszont valódi számolás, ezért ha a játék harc közben titkosítja a
-  manát, az átlag baron `?` látszik, amíg az értékek újra olvashatók nem lesznek.
+- Az **átlag** viszont összeadás, azt az addon nem végezheti el titkosított értékeken,
+  ezért számot nem tud kiírni. Helyette a játék rajzolja ki: a healerek bar-darabjai
+  egymás után kerülnek (mindegyik a teljes szélesség 1/N-ed részén), így a kitöltés hossza
+  pontosan az átlag, a színük pedig összeadódik az átlag színére. Az addon közben egyetlen
+  értéket sem lát. Amikor a mana olvasható, a pontos % is kiíródik.
 - Az **ivás** jelzés harcon kívül működik (harcban úgysem lehet inni).
 
 ## Fejlesztőknek

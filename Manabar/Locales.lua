@@ -54,7 +54,7 @@ ns.STRINGS = {
         optAll          = "Mind",
         optNone         = "Egyik sem",
         optHint         = "A specet a csapatszerep vagy egy rövid inspect alapján ismeri fel (csak harcon kívül). "
-            .. "Az átlag harc közben csak akkor számolható, ha a játék engedi olvasni a manát.",
+            .. "Ha a játék nem engedi olvasni a mana értékét, az átlagot szám nélkül, a bar hossza és színe mutatja.",
 
         help = {
             "Parancsok (/manabar ...):",
@@ -123,7 +123,8 @@ ns.STRINGS = {
         optAll          = "All",
         optNone         = "None",
         optHint         = "The spec is recognised from the group role or a short inspect (out of combat only). "
-            .. "In combat the average can only be calculated if the game lets addons read the mana.",
+            .. "If the game does not let addons read the mana values, the average is shown without a number, "
+            .. "by the bar's length and color.",
 
         help = {
             "Commands (/manabar ...):",

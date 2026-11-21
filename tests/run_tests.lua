@@ -121,6 +121,35 @@ local function color(r, rr, gg, bb, what)
     near(r.b, bb, (what or "") .. " blue", 1e-3)
 end
 
+-- What the summary bar draws while the mana is secret: the filled fraction of
+-- its width, and the color of the additive paint layers (summed, clamped).
+local function visualAverage(ns)
+    local sb = ns.GetSummaryBar()
+    truthy(sb.stack:IsShown(), "visual average shown")
+    local width = ManabarDB.width - 2
+    local length, r, g, b, n = 0, 0, 0, 0, 0
+    for i, seg in ipairs(sb.segments) do
+        if seg:IsShown() then
+            n = n + 1
+            if i > 1 then -- every segment starts where the previous fill ends
+                local _, rel, relPoint = seg:GetPoint(1)
+                eq(rel, sb.segments[i - 1]:GetStatusBarTexture(), "segment " .. i .. " anchor")
+                eq(relPoint, "TOPRIGHT", "segment " .. i .. " anchor point")
+            end
+            length = length + seg:GetWidth() * seg.__value
+            local paint = sb.paints[i]
+            eq(paint.__blend, "ADD", "additive paint")
+            local _, endRel = paint:GetPoint(2)
+            truthy(endRel ~= nil, "paint anchored to the fill end")
+            local c, a = paint.__color, paint.__alpha
+            r, g, b = r + c[1] * a, g + c[2] * a, b + c[3] * a
+        end
+    end
+    local _, lastFill = sb.paints[1]:GetPoint(2)
+    eq(lastFill, sb.segments[n]:GetStatusBarTexture(), "paints end at the last segment's fill")
+    return length / width, math.min(r, 1), math.min(g, 1), math.min(b, 1), n
+end
+
 local function noDebugErrors()
     notContains(M.chatText(), "debug:", "chat")
 end
@@ -250,7 +279,10 @@ test("secret mana in combat: no Lua errors, bars still show % and color", functi
     truthy(thalia.secretColor, "color came from a secret value")
     color(thalia, 1, 0.2, 0, "10%")
     eq(byName(ns, "Myra").perc, "80%", "own mana")
-    eq(ns.GetSummaryBar().perc.__text, "?", "average unknown while values are secret")
+    local length, _, _, _, n = visualAverage(ns)
+    eq(n, 3, "one segment per bar")
+    near(length, (0.8 + 0.29 + 0.10) / 3, "the game draws the average", 1e-9)
+    eq(ns.GetSummaryBar().perc.__text, "", "no number while the values are secret")
     M.run(1)
     noDebugErrors()
 end)
@@ -279,6 +311,8 @@ test("client without curve objects: plain math, and secrets still reach the bar"
     local thalia = byName(ns, "Thalia")
     truthy(thalia.secretValue, "secret value passed to the bar")
     eq(thalia.perc, "", "no % without curves")
+    M.run(0.5)
+    eq(ns.GetSummaryBar().perc.__text, "?", "no average without curves")
     noDebugErrors()
 end)
 
@@ -352,6 +386,10 @@ test("summary bar: average of the shown bars, toggle, hidden with a single bar",
     eq(lastY, -56, "third bar")
     eq(sumY, -78, "summary bar 4 px below the last bar")
     eq(ManabarFrame:GetHeight(), 100, "frame height")
+    eq(#summary.ticks, 3, "25 / 50 / 75 % marks")
+    local _, _, _, tickX = summary.ticks[2]:GetPoint(1)
+    near(tickX, (180 - 2) * 0.5, "50% mark")
+    falsy(summary.stack:IsShown(), "exact number, no visual layer")
     slash("summary")
     falsy(summary:IsShown(), "summary hidden")
     falsy(ManabarDB.summary, "saved")
@@ -362,6 +400,86 @@ test("summary bar: average of the shown bars, toggle, hidden with a single bar",
     M.run(0.3)
     eq(ns.GetActiveBars(), 1, "one bar")
     falsy(summary:IsShown(), "no summary for a single bar")
+end)
+
+test("secret mana: the summary bar draws the exact average, length and color", function()
+    local ns = start({ group = "party" })
+    M.flags.restricted = true
+    M.run(0.6)
+    local summary = ns.GetSummaryBar()
+    local length, r, g, b, n = visualAverage(ns)
+    local avg = (0.8 + 0.29 + 0.45) / 3
+    eq(n, 3, "segments")
+    near(length, avg, "drawn length", 1e-9)
+    local er, eg, eb = ns.GradientRGB(avg)
+    near(r, er, "red", 1e-9)
+    near(g, eg, "green", 1e-9)
+    near(b, eb, "blue", 1e-9)
+    eq(summary.status.__value, 0, "the summary's own fill is empty")
+    eq(summary.name.__text, "Átlag", "label")
+
+    M.member("party1").mana = 10000
+    M.member("party3").mana = 10000
+    M.fire("UNIT_POWER_FREQUENT", "party1", "MANA")
+    M.fire("UNIT_POWER_FREQUENT", "party3", "MANA")
+    M.run(0.15)
+    length, r, g = visualAverage(ns)
+    near(length, (0.8 + 1 + 1) / 3, "follows mana changes", 1e-9)
+    near(g, 1, "green when almost full", 1e-9)
+
+    M.flags.restricted = false
+    M.run(0.6)
+    falsy(summary.stack:IsShown(), "visual layer hidden once readable")
+    eq(summary.perc.__text, "93%", "exact average when readable")
+    noDebugErrors()
+end)
+
+test("visual average with a single counted bar", function()
+    local members = party5()
+    members[4].connected = false -- Fern offline: only Thalia counts
+    local ns = start({ group = "party", members = members, db = { welcomed = true, debug = true, showSelf = false } })
+    M.flags.restricted = true
+    M.run(0.6)
+    local length, r, g, _, n = visualAverage(ns)
+    eq(n, 1, "one segment")
+    near(length, 0.45, "Thalia's mana", 1e-9)
+    near(ns.GetSummaryBar().paints[1].__alpha, 1, "full strength")
+    local er, eg = ns.GradientRGB(0.45)
+    near(r, er, "red", 1e-9)
+    near(g, eg, "green", 1e-9)
+    noDebugErrors()
+end)
+
+test("visual average when the secret colors cannot be indexed", function()
+    local ns = start({ group = "party", db = { welcomed = true } })
+    M.flags.restricted = true
+    M.flags.colorMode = "opaque"
+    M.run(0.6)
+    local length, r, g = visualAverage(ns)
+    local avg = (0.8 + 0.29 + 0.45) / 3
+    near(length, avg, "length", 1e-9)
+    local er, eg = ns.GradientRGB(avg)
+    near(r, er, "red", 1e-9)
+    near(g, eg, "green", 1e-9)
+end)
+
+test("visual average follows the group: segments are reused", function()
+    local ns = start({ group = "party" })
+    M.flags.restricted = true
+    M.run(0.6)
+    local _, _, _, _, n = visualAverage(ns)
+    eq(n, 3, "three")
+    slash("ignore Fern")
+    M.run(0.6)
+    local length
+    length, _, _, _, n = visualAverage(ns)
+    eq(n, 2, "two")
+    near(length, (0.8 + 0.45) / 2, "average of two", 1e-9)
+    falsy(ns.GetSummaryBar().segments[3]:IsShown(), "spare segment hidden")
+    slash("width 250")
+    M.run(0.6)
+    length = visualAverage(ns)
+    near(length, (0.8 + 0.45) / 2, "still exact after resizing", 1e-9)
 end)
 
 test("options window: opens with /manabar and the gear, reflects and changes settings", function()

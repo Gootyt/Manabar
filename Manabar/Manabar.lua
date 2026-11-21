@@ -120,7 +120,8 @@ local inCombat = false
 local dirtyPending = false
 local dirtyTimer, refreshTimer = 0, 0
 local rebuildPending = false
-local fracCurve, pctCurve, colorCurve
+local fracCurve, pctCurve, colorCurve, rgCurve
+local okBars = {}             -- scratch: the bars that count for the average
 local useCurves = false
 local drinkNames, drinkNameList = {}, {}
 local drinkScanners = {}
@@ -225,6 +226,12 @@ local function CreateCurves()
         local g = GRADIENT[i]
         colorCurve:AddPoint(g[1], CreateColor(g[2], g[3], g[4], 1))
     end
+    -- Straight red -> green, for the summary bar: N of these, added up with
+    -- alpha 2/N and clamped, give exactly the GRADIENT color of the average.
+    rgCurve = C_CurveUtil.CreateColorCurve()
+    if linear then rgCurve:SetType(linear) end
+    rgCurve:AddPoint(0, CreateColor(1, 0, 0, 1))
+    rgCurve:AddPoint(1, CreateColor(0, 1, 0, 1))
 end
 
 local function BuildCurves()
@@ -688,13 +695,23 @@ local function SetPlainValue(bar, frac)
     sb:GetStatusBarTexture():SetVertexColor(GradientRGB(frac))
 end
 
-local function ApplyColorFromUnit(tex, unit)
-    local color = UnitPowerPercent(unit, PT_MANA, false, colorCurve)
+local function ApplyColorFromUnit(tex, unit, curve)
+    local color = UnitPowerPercent(unit, PT_MANA, false, curve)
     tex:SetVertexColor(color:GetRGB())
 end
 
-local function ApplyColorFromFraction(tex, frac)
-    tex:SetVertexColor(colorCurve:EvaluateUnpacked(frac))
+local function ApplyColorFromFraction(tex, frac, curve)
+    tex:SetVertexColor(curve:EvaluateUnpacked(frac))
+end
+
+-- Colors a texture by a unit's (possibly secret) mana through a color curve.
+local function ApplyCurveColor(tex, unit, frac, curve)
+    local ok, err = pcall(ApplyColorFromUnit, tex, unit, curve)
+    if not ok then
+        Debug(err)
+        ok, err = pcall(ApplyColorFromFraction, tex, frac, curve)
+        if not ok then Debug(err) end
+    end
 end
 
 -- Secret-safe path: the values may be secret, they only go into widgets.
@@ -707,13 +724,7 @@ local function UpdateManaCurve(bar, unit)
     sb:SetValue(frac)
     local pct = UnitPowerPercent(unit, PT_MANA, false, pctCurve)
     if pct then bar.perc:SetFormattedText("%d%%", pct) end
-    local tex = sb:GetStatusBarTexture()
-    local ok, err = pcall(ApplyColorFromUnit, tex, unit)
-    if not ok then
-        Debug(err)
-        ok, err = pcall(ApplyColorFromFraction, tex, frac)
-        if not ok then Debug(err) end
-    end
+    ApplyCurveColor(sb:GetStatusBarTexture(), unit, frac, colorCurve)
     return Plain(frac)
 end
 
@@ -797,32 +808,117 @@ local function SummaryVisible()
     return db.summary and activeBars >= 2
 end
 
--- Average of the shown bars. Only possible when no mana value is secret.
+-- Visual average for secret mana. Addon code may not add secret values up, but
+-- the game can draw them: n segment bars, each 1/n of the width, are chained so
+-- that every segment starts where the previous one's fill ends. The filled
+-- length is then exactly the average. The segments' own fills are invisible;
+-- the visible fill is painted by n additive layers (red -> green, alpha 2/n)
+-- that add up, clamped, to the GRADIENT color of the average. The addon never
+-- learns the average itself.
+local function LayoutSegments(n)
+    local sb = summaryBar
+    local w, h = db.width - 2, db.height - 2
+    if sb.segN == n and sb.segW == w and sb.segH == h then return end
+    sb.segN, sb.segW, sb.segH = n, w, h
+    local segments, paints = sb.segments, sb.paints
+    for i = 1, n do
+        local seg = segments[i]
+        if not seg then
+            seg = CreateFrame("StatusBar", nil, sb.stack)
+            seg:SetStatusBarTexture(BAR_TEXTURE)
+            seg:SetStatusBarColor(0, 0, 0, 0) -- only its geometry is used
+            seg:SetMinMaxValues(0, 1)
+            seg:SetValue(0)
+            segments[i] = seg
+        end
+        seg:ClearAllPoints()
+        if i == 1 then
+            seg:SetPoint("TOPLEFT", sb.stack, "TOPLEFT", 0, 0)
+        else
+            seg:SetPoint("TOPLEFT", segments[i - 1]:GetStatusBarTexture(), "TOPRIGHT", 0, 0)
+        end
+        seg:SetSize(w / n, h)
+        seg:Show()
+    end
+    for i = n + 1, #segments do segments[i]:Hide() end
+
+    local fillEnd = segments[n]:GetStatusBarTexture()
+    sb.paintBase:ClearAllPoints()
+    sb.paintBase:SetPoint("TOPLEFT", sb.stack, "TOPLEFT", 0, 0)
+    sb.paintBase:SetPoint("BOTTOMRIGHT", fillEnd, "BOTTOMRIGHT", 0, 0)
+    for i = 1, n do
+        local paint = paints[i]
+        if not paint then
+            paint = sb.stack:CreateTexture(nil, "ARTWORK")
+            paint:SetTexture(BAR_TEXTURE)
+            paint:SetBlendMode("ADD")
+            paints[i] = paint
+        end
+        paint:ClearAllPoints()
+        paint:SetPoint("TOPLEFT", sb.stack, "TOPLEFT", 0, 0)
+        paint:SetPoint("BOTTOMRIGHT", fillEnd, "BOTTOMRIGHT", 0, 0)
+        paint:SetAlpha(n == 1 and 1 or 2 / n)
+        paint:Show()
+    end
+    for i = n + 1, #paints do paints[i]:Hide() end
+end
+
+local function ShowVisualAverage(n)
+    LayoutSegments(n)
+    local sb = summaryBar
+    for i = 1, n do
+        local unit = okBars[i].unit
+        local frac = UnitPowerPercent(unit, PT_MANA, false, fracCurve)
+        sb.segments[i]:SetValue(frac or 0)
+        ApplyCurveColor(sb.paints[i], unit, frac, n == 1 and colorCurve or rgCurve)
+    end
+end
+
+-- Average of the shown bars (offline / dead ones do not count): an exact
+-- percentage while the mana values are readable, the visual average while the
+-- game keeps them secret.
 local function UpdateSummary()
     if not summaryBar then return end
     if not SummaryVisible() then
         summaryBar:Hide()
         return
     end
-    local sum, count, unknown = 0, 0, false
+    local sum, secret = 0, false
+    wipe(okBars)
     for i = 1, activeBars do
         local bar = bars[i]
         if bar.state == "ok" then
+            okBars[#okBars + 1] = bar
             if bar.frac then
-                sum, count = sum + bar.frac, count + 1
-            else
-                unknown = true
+                sum = sum + bar.frac
+            elseif bar.unit then
+                secret = true
             end
         end
     end
-    if unknown then
-        SetGray(summaryBar, "?")
-    elseif count == 0 then
-        SetGray(summaryBar, "--")
+    local sb = summaryBar
+    local n = #okBars
+    local visual = false
+    if n == 0 then
+        SetGray(sb, "--")
+    elseif not secret then
+        SetPlainValue(sb, sum / n)
+    elseif useCurves then
+        local ok, err = pcall(ShowVisualAverage, n)
+        if ok then
+            visual = true
+            sb.status:SetMinMaxValues(0, 1)
+            sb.status:SetValue(0)
+            sb.perc:SetText("")
+        else
+            Debug(err)
+            SetGray(sb, "?")
+        end
     else
-        SetPlainValue(summaryBar, sum / count)
+        SetGray(sb, "?")
     end
-    summaryBar:Show()
+    sb.stack:SetShown(visual)
+    sb:Show()
 end
 
 -------------------------------------------------------------------------------
@@ -914,6 +1010,11 @@ local function Layout()
         summaryBar:ClearAllPoints()
         summaryBar:SetPoint("TOPLEFT", frame, "TOPLEFT", PAD, -(height - PAD + SUMMARY_GAP))
         StyleBar(summaryBar, w, h, fontSize)
+        for _, tick in ipairs(summaryBar.ticks) do
+            tick:ClearAllPoints()
+            tick:SetSize(1, h - 4)
+            tick:SetPoint("LEFT", summaryBar.status, "LEFT", (w - 2) * tick.frac, 0)
+        end
         height = height + SUMMARY_GAP + h
     end
     frame:SetSize(w + PAD * 2, height)
@@ -1151,6 +1252,26 @@ local function CreateMainFrame()
 
     summaryBar = CreateBar()
     summaryBar.name:SetTextColor(1, 0.82, 0)
+    -- Visual average (see LayoutSegments): drawn under the summary's own bar,
+    -- whose texts and ticks stay on top.
+    local stack = CreateFrame("Frame", nil, summaryBar)
+    stack:SetPoint("TOPLEFT", summaryBar, "TOPLEFT", 1, -1)
+    stack:SetPoint("BOTTOMRIGHT", summaryBar, "BOTTOMRIGHT", -1, 1)
+    stack:SetFrameLevel(summaryBar:GetFrameLevel() + 1)
+    summaryBar.status:SetFrameLevel(summaryBar:GetFrameLevel() + 2)
+    stack:Hide()
+    local paintBase = stack:CreateTexture(nil, "BACKGROUND")
+    paintBase:SetColorTexture(0, 0, 0, 1) -- the additive paints start from black
+    summaryBar.stack, summaryBar.paintBase = stack, paintBase
+    summaryBar.segments, summaryBar.paints = {}, {}
+    -- 25 / 50 / 75 % marks, to read the average without a number
+    summaryBar.ticks = {}
+    for i, f in ipairs({ 0.25, 0.5, 0.75 }) do
+        local tick = summaryBar.status:CreateTexture(nil, "OVERLAY")
+        tick:SetColorTexture(1, 1, 1, 0.3)
+        tick.frac = f
+        summaryBar.ticks[i] = tick
+    end
     summaryBar:Hide()
 
     frame:SetScript("OnDragStart", function(self)
