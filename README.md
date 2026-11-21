@@ -1,7 +1,7 @@
 # Manabar
 
-WoW Forever addon (Interface 16001), ami a csapatod healereinek – vagy bármelyik
-kiválasztott kaszt/spec kombinációnak – a manáját mutatja egy-egy baron.
+WoW Forever addon (Interface 16001), ami a csapatod healereinek – vagy a kiválasztott
+szerepű (Healer / DPS / Tank) játékosoknak – a manáját mutatja egy-egy baron.
 
 ## Mit tud
 
@@ -19,13 +19,11 @@ kiválasztott kaszt/spec kombinációnak – a manáját mutatja egy-egy baron.
   - csak harcon kívül látszik
   - átlag bar a lista alján
   - a saját manád is látszik-e
-  - akinek még nem ismert a specje, az is látszódjon-e (alapból nem)
+  - akinek még nem ismert a szerepe, az is látszódjon-e (alapból nem)
   - spec ikon a bar elején
   - ablak rögzítése
-  - **kinek a manáját mutassa**: kaszt **és** spec szerint, egy rácsban pipálhatod ki
-    (Priest, Paladin, Shaman, Druid, Mage, Warlock, Hunter – mindegyiknél külön a 3 spec).
-    A kaszt nevére kattintva az egész sor be/ki kapcsol. Alapból a healer specek vannak
-    bepipálva. Gyorsgombok: *Csak healerek*, *Mind*, *Egyik sem*.
+  - **kinek a manáját mutassa**: szerep szerint – **Healer**, **DPS**, **Tank**
+    (bármelyik kombináció). Alapból csak a Healer van bepipálva.
 - Offline / halott állapot szürke barral („Offline”, „Halott”).
 - Magyar és angol felület (`/manabar lang hu` / `/manabar lang en`).
 
@@ -69,21 +67,20 @@ Első indításkor az ablak feloldva, középen jelenik meg: húzd a helyére, m
 
 ## Hogyan dönti el, kit mutasson?
 
-A szűrés kaszt **és** spec szerint történik: ha például csak a Frost Mage van bepipálva,
-egy Fire Mage nem jelenik meg.
+A szűrés a játékos szerepe szerint történik (Healer / DPS / Tank):
 
 1. Kézi listák (`add` / `ignore`) – ezek mindent felülírnak.
-2. Ha a játékos specje ismert (a sajátod mindig, másoké inspect után), csak a
-   kipipált specek látszanak.
-3. Ha a spec még nem ismert, a csapatszerep (tank / healer / dps) szűkít: pl. Paladin +
-   healer szerep = Holy, Priest + dps szerep = Shadow. Ha így is több spec lehetséges,
-   és ezek nem egyformán vannak pipálva, az illető **rejtve marad**, amíg egy rövid
-   **inspect** ki nem deríti a specjét (csak harcon kívül, legfeljebb 2 másodpercenként
-   egy játékos). Ha inkább azonnal látni szeretnéd, kapcsold be a beállításokban az
-   „Akinek még nem ismert a specje, az is látszik” opciót – ilyenkor kérdőjel ikon jelzi,
-   hogy a spec még nem biztos.
+2. Csak manát használó kasztok jelenhetnek meg: Warrior és Rogue soha (akkor sem, ha a
+   Tank vagy a DPS be van pipálva).
+3. A szerep az, amit a csapatban beállítottak (csoportkereső / szerepválasztás).
+4. Ha nincs beállított szerep, a spec szerepe dönt: a sajátod mindig ismert, másokét egy
+   rövid **inspect** deríti ki (csak harcon kívül, legfeljebb 2 másodpercenként egy
+   játékos). Ha a kaszt minden specje ugyanazt a választ adja (pl. a Mage mindig DPS),
+   inspect sem kell. Amíg nem derül ki, az illető **rejtve marad** – ha inkább azonnal
+   látni szeretnéd, kapcsold be az „Akinek még nem ismert a szerepe, az is látszik”
+   opciót; ilyenkor kérdőjel ikon jelzi, hogy még nem biztos.
 
-A bar elején lévő ikon mutatja, minek ismerte fel az addon az illetőt.
+A bar elején lévő ikon mutatja, minek (melyik specnek) ismerte fel az addon az illetőt.
 
 ## Harc közbeni korlátozások (Midnight „secret values”)
 

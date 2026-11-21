@@ -1,14 +1,15 @@
 -- Manabar settings window: opened by the gear icon on the bars or /manabar.
--- Display options, the class/spec combinations whose mana is shown, presets.
+-- The group roles whose mana is shown (Healer / DPS / Tank) and the display
+-- options.
 
 local _, ns = ...
 
+local WIDTH      = 380
 local PAD        = 14
-local CLASS_COL  = 86   -- width of the class name column
-local SPEC_COL   = 140  -- width of one spec checkbox column
 local ROW_H      = 22
 local CHECK_SIZE = 20
-local ICON_SIZE  = 14
+local ROLE_COL   = 112  -- width of one role checkbox
+local ICON_SIZE  = 16
 
 local CHECK_TEXTURES = {
     normal    = "Interface\\Buttons\\UI-CheckBox-Up",
@@ -17,11 +18,12 @@ local CHECK_TEXTURES = {
     checked   = "Interface\\Buttons\\UI-CheckBox-Check",
 }
 
--- Used when RAID_CLASS_COLORS is not available.
-local CLASS_COLORS = {
-    PRIEST = { 1, 1, 1 }, PALADIN = { 0.96, 0.55, 0.73 }, SHAMAN = { 0, 0.44, 0.87 },
-    DRUID = { 1, 0.49, 0.04 }, MAGE = { 0.25, 0.78, 0.92 }, WARLOCK = { 0.53, 0.53, 0.93 },
-    HUNTER = { 0.67, 0.83, 0.45 },
+-- Blizzard's role icons, the same as in the group finder.
+local ROLE_ICONS = "Interface\\LFGFrame\\UI-LFG-ICON-PORTRAITROLES"
+local ROLES = {
+    { role = "HEALER",  text = "roleHealer",  coords = { 20 / 64, 39 / 64, 1 / 64, 20 / 64 } },
+    { role = "DAMAGER", text = "roleDamager", coords = { 20 / 64, 39 / 64, 22 / 64, 41 / 64 } },
+    { role = "TANK",    text = "roleTank",    coords = { 0, 19 / 64, 22 / 64, 41 / 64 } },
 }
 
 -- Display options: SavedVariables key + text key.
@@ -34,29 +36,14 @@ local OPTIONS = {
     { key = "locked",       text = "optLocked" },
 }
 
-local PRESETS = {
-    { text = "optHealers", mode = "default" },
-    { text = "optAll",     mode = "all" },
-    { text = "optNone",    mode = "none" },
-}
-
 local win
 local labels = {}       -- { fontString, text key } for re-translation
 local optionChecks = {} -- { checkButton, SavedVariables key }
-local specChecks = {}   -- { checkButton, specID }
-local classButtons = {} -- { button, classFile }
+local roleChecks = {}   -- { checkButton, role }
 
 local function T(key)
     local texts = ns.GetL()
     return texts and texts[key] or key
-end
-
-local function ClassColor(classFile)
-    local c = RAID_CLASS_COLORS and RAID_CLASS_COLORS[classFile]
-    if type(c) == "table" and type(c.r) == "number" then return c.r, c.g, c.b end
-    c = CLASS_COLORS[classFile]
-    if c then return c[1], c[2], c[3] end
-    return 1, 1, 1
 end
 
 local function NewText(parent, size, r, g, b)
@@ -112,13 +99,6 @@ local function NewButton(parent, width, height, onClick)
 end
 
 local function Create()
-    local classSpecs = ns.GetClassSpecs()
-    local maxSpecs = 3
-    for _, class in ipairs(classSpecs) do
-        if #class.specs > maxSpecs then maxSpecs = #class.specs end
-    end
-    local width = PAD * 2 + CLASS_COL + maxSpecs * SPEC_COL
-
     win = CreateFrame("Frame", "ManabarOptionsFrame", UIParent, ns.BACKDROP_TEMPLATE)
     win:Hide()
     win:SetFrameStrata("DIALOG")
@@ -147,15 +127,40 @@ local function Create()
     close:SetPoint("TOPRIGHT", win, "TOPRIGHT", -8, -8)
     close.label:SetText("X")
 
-    -- Display options
+    -- Roles
     local y = -40
+    local rolesTitle = NewText(win, 12, 1, 0.82, 0)
+    rolesTitle:SetPoint("TOPLEFT", win, "TOPLEFT", PAD, y)
+    Localize(rolesTitle, "optRoles")
+    y = y - 20
+    for i, entry in ipairs(ROLES) do
+        local role = entry.role
+        local cb = NewCheck(win, ROLE_COL - CHECK_SIZE - 4, function(self)
+            ns.SetRoleEnabled(role, self:GetChecked() and true or false)
+        end)
+        cb:SetPoint("TOPLEFT", win, "TOPLEFT", PAD + (i - 1) * ROLE_COL, y)
+        local icon = cb:CreateTexture(nil, "ARTWORK")
+        icon:SetSize(ICON_SIZE, ICON_SIZE)
+        icon:SetPoint("LEFT", cb, "RIGHT", 1, 0)
+        icon:SetTexture(ROLE_ICONS)
+        icon:SetTexCoord(entry.coords[1], entry.coords[2], entry.coords[3], entry.coords[4])
+        cb.icon = icon
+        cb.label:ClearAllPoints()
+        cb.label:SetPoint("LEFT", icon, "RIGHT", 3, 0)
+        cb.label:SetWidth(ROLE_COL - CHECK_SIZE - ICON_SIZE - 10)
+        Localize(cb.label, entry.text)
+        roleChecks[#roleChecks + 1] = { cb, role }
+    end
+    y = y - ROW_H - 10
+
+    -- Display options
     local display = NewText(win, 12, 1, 0.82, 0)
     display:SetPoint("TOPLEFT", win, "TOPLEFT", PAD, y)
     Localize(display, "optDisplay")
     y = y - 18
     for _, opt in ipairs(OPTIONS) do
         local key = opt.key
-        local cb = NewCheck(win, width - PAD * 2 - CHECK_SIZE - 4, function(self)
+        local cb = NewCheck(win, WIDTH - PAD * 2 - CHECK_SIZE - 4, function(self)
             ns.SetOption(key, self:GetChecked() and true or false)
         end)
         cb:SetPoint("TOPLEFT", win, "TOPLEFT", PAD, y)
@@ -164,87 +169,15 @@ local function Create()
         y = y - ROW_H
     end
 
-    -- Class / spec grid
-    y = y - 10
-    local specsTitle = NewText(win, 12, 1, 0.82, 0)
-    specsTitle:SetPoint("TOPLEFT", win, "TOPLEFT", PAD, y)
-    Localize(specsTitle, "optSpecs")
-    y = y - 18
-    for _, class in ipairs(classSpecs) do
-        -- The class name toggles the whole row.
-        local classFile = class.classFile
-        local classButton = CreateFrame("Button", nil, win)
-        classButton:SetSize(CLASS_COL - 6, CHECK_SIZE)
-        classButton:SetPoint("TOPLEFT", win, "TOPLEFT", PAD, y)
-        local className = NewText(classButton, 12, ClassColor(classFile))
-        className:SetPoint("LEFT", classButton, "LEFT", 0, 0)
-        className:SetWidth(CLASS_COL - 6)
-        className:SetWordWrap(false)
-        className:SetText(class.name)
-        classButton.label = className
-        classButton:SetScript("OnClick", function()
-            ns.ToggleClass(classFile)
-            ns.RefreshOptions()
-        end)
-        classButton:SetScript("OnEnter", function(self)
-            if not GameTooltip then return end
-            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-            GameTooltip:SetText(class.name)
-            GameTooltip:AddLine(T("classTip"), 1, 1, 1)
-            GameTooltip:Show()
-        end)
-        classButton:SetScript("OnLeave", function(self)
-            if GameTooltip and GameTooltip:IsOwned(self) then GameTooltip:Hide() end
-        end)
-        classButtons[#classButtons + 1] = { classButton, classFile }
-
-        local labelWidth = SPEC_COL - CHECK_SIZE - 6
-        for i, spec in ipairs(class.specs) do
-            local specID = spec.id
-            local cb = NewCheck(win, labelWidth, function(self)
-                ns.SetSpecEnabled(specID, self:GetChecked() and true or false)
-            end)
-            cb:SetPoint("TOPLEFT", win, "TOPLEFT", PAD + CLASS_COL + (i - 1) * SPEC_COL, y)
-            if spec.icon then
-                local icon = cb:CreateTexture(nil, "ARTWORK")
-                icon:SetSize(ICON_SIZE, ICON_SIZE)
-                icon:SetPoint("LEFT", cb, "RIGHT", 1, 0)
-                icon:SetTexture(spec.icon)
-                icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
-                cb.icon = icon
-                cb.label:ClearAllPoints()
-                cb.label:SetPoint("LEFT", icon, "RIGHT", 3, 0)
-                cb.label:SetWidth(labelWidth - ICON_SIZE - 6)
-            end
-            cb.label:SetText(spec.name)
-            specChecks[#specChecks + 1] = { cb, specID }
-        end
-        y = y - ROW_H
-    end
-
-    -- Presets
     y = y - 8
-    local x = PAD
-    for _, preset in ipairs(PRESETS) do
-        local mode = preset.mode
-        local b = NewButton(win, 120, 22, function()
-            ns.SetAllSpecs(mode)
-            ns.RefreshOptions()
-        end)
-        b:SetPoint("TOPLEFT", win, "TOPLEFT", x, y)
-        Localize(b.label, preset.text)
-        x = x + 128
-    end
-    y = y - 32
-
     local hint = NewText(win, 10, 0.65, 0.65, 0.65)
     hint:SetPoint("TOPLEFT", win, "TOPLEFT", PAD, y)
-    hint:SetWidth(width - PAD * 2)
+    hint:SetWidth(WIDTH - PAD * 2)
     hint:SetWordWrap(true)
     Localize(hint, "optHint")
-    y = y - 40
+    y = y - 60
 
-    win:SetSize(width, -y)
+    win:SetSize(WIDTH, -y)
 
     -- Escape closes the window.
     if type(UISpecialFrames) == "table" then table.insert(UISpecialFrames, "ManabarOptionsFrame") end
@@ -257,8 +190,8 @@ function ns.RefreshOptions()
     for _, entry in ipairs(optionChecks) do
         entry[1]:SetChecked(db[entry[2]] and true or false)
     end
-    for _, entry in ipairs(specChecks) do
-        entry[1]:SetChecked(ns.IsSpecEnabled(entry[2]) and true or false)
+    for _, entry in ipairs(roleChecks) do
+        entry[1]:SetChecked(ns.IsRoleEnabled(entry[2]) and true or false)
     end
 end
 
@@ -280,5 +213,5 @@ end
 
 -- For the offline tests.
 function ns.GetOptionsFrame()
-    return win, optionChecks, specChecks, classButtons
+    return win, optionChecks, roleChecks
 end

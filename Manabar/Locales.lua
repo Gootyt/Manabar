@@ -45,16 +45,17 @@ ns.STRINGS = {
         optHideInCombat = "Csak harcon kívül látszik",
         optSummary      = "Átlag bar a lista alján (a mutatott barok átlaga)",
         optShowSelf     = "A saját manám is látszik",
-        optShowUnknown  = "Akinek még nem ismert a specje, az is látszik (amíg ki nem derül)",
+        optShowUnknown  = "Akinek még nem ismert a szerepe, az is látszik (amíg ki nem derül)",
         optSpecIcons    = "Spec ikon a bar elején",
         optLocked       = "Ablak rögzítése (nem mozgatható)",
-        optSpecs        = "Melyik kaszt / spec manája látszódjon? (a kaszt nevére kattintva az egész sor)",
-        classTip        = "Kattintás: a kaszt összes specje be / ki",
-        optHealers      = "Csak healerek",
-        optAll          = "Mind",
-        optNone         = "Egyik sem",
-        optHint         = "A specet a csapatszerep vagy egy rövid inspect alapján ismeri fel (csak harcon kívül). "
-            .. "Ha a játék nem engedi olvasni a mana értékét, az átlagot szám nélkül, a bar hossza és színe mutatja.",
+        optRoles        = "Kinek a manáját mutassa? (szerep szerint)",
+        roleHealer      = "Healer",
+        roleDamager     = "DPS",
+        roleTank        = "Tank",
+        optHint         = "A szerepet a csapatban beállított szerep adja; ha nincs ilyen, a spec alapján dönt "
+            .. "(ezt egy rövid inspect deríti ki, csak harcon kívül). Warrior és Rogue nem jelenik meg, mert nincs "
+            .. "manájuk. Ha a játék nem engedi olvasni a mana értékét, az átlagot szám nélkül, a bar hossza és "
+            .. "színe mutatja.",
 
         help = {
             "Parancsok (/manabar ...):",
@@ -115,17 +116,17 @@ ns.STRINGS = {
         optHideInCombat = "Only show out of combat",
         optSummary      = "Summary bar at the bottom (average)",
         optShowSelf     = "Show my own mana too",
-        optShowUnknown  = "Also show players whose spec is not known yet",
+        optShowUnknown  = "Also show players whose role is not known yet",
         optSpecIcons    = "Spec icon at the start of the bar",
         optLocked       = "Lock the frame (not movable)",
-        optSpecs        = "Which class / spec to show? (click a class name for its whole row)",
-        classTip        = "Click: all specs of this class on / off",
-        optHealers      = "Healers only",
-        optAll          = "All",
-        optNone         = "None",
-        optHint         = "The spec is recognised from the group role or a short inspect (out of combat only). "
-            .. "If the game does not let addons read the mana values, the average is shown without a number, "
-            .. "by the bar's length and color.",
+        optRoles        = "Whose mana to show? (by role)",
+        roleHealer      = "Healer",
+        roleDamager     = "DPS",
+        roleTank        = "Tank",
+        optHint         = "The role is the one set in the group; without one, the spec decides (found out by a "
+            .. "short inspect, out of combat only). Warriors and Rogues are never shown: they have no mana. If the "
+            .. "game does not let addons read the mana values, the average is shown without a number, by the bar's "
+            .. "length and color.",
 
         help = {
             "Commands (/manabar ...):",

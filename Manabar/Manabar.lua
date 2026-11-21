@@ -2,8 +2,9 @@
 Manabar - mana bars for WoW Forever
 (Interface 16001, runs on the Midnight-based Mainline client)
 
-One bar per selected class/spec in your party or raid (by default: the
-healers): the player's name, the mana percentage and a "drinking" indicator.
+One bar per player of the selected group roles (healer / dps / tank; by
+default the healers) in your party or raid: the player's name, the mana
+percentage and a "drinking" indicator.
 The bar color follows the mana: 100% green -> 50% yellow -> 0% red. An optional
 summary bar at the bottom shows the average. The frame can be dragged while
 unlocked; the gear icon (or /manabar) opens the settings window (Options.lua).
@@ -359,13 +360,11 @@ local function BuildSpecData()
     end
 end
 
--- A spec is shown when the player ticked it; untouched specs default to the
--- healer specializations.
-local function IsSpecEnabled(specID)
-    local v = db.specs[specID]
-    if v ~= nil then return v == true end
-    local spec = specInfoByID[specID]
-    return spec ~= nil and spec.role == "HEALER"
+-- The group roles whose mana is shown (settings window: Healer / DPS / Tank).
+local DEFAULT_ROLES = { HEALER = true, DAMAGER = false, TANK = false }
+
+local function IsRoleEnabled(role)
+    return db.roles[role] == true
 end
 
 -- Maps a spec ID from any API to the spec entry of the class. An ID the class
@@ -561,14 +560,15 @@ local function CandidateSpecs(specs, role)
     return specs
 end
 
--- Decides by class AND spec. Returns: show, spec (entry or nil), specUnknown,
--- needsInspect.
+-- Decides by group role. Returns: show, spec (for the icon, or nil),
+-- specUnknown, needsInspect.
 --   1. manual lists (/manabar add / ignore)
---   2. known spec (yours, or inspected): exactly the ticked specs
---   3. spec unknown: the group role narrows the class's specs down; one left =
---      that is the spec. If all candidates are ticked (or none), the answer is
---      clear anyway. Otherwise the player is hidden (unless "show unknown" is
---      on) until a short inspection tells the spec.
+--   2. only classes that use mana (no bars for Warriors and Rogues)
+--   3. the role set in the group (tank / healer / dps); without one, the role
+--      of the spec (yours, or from a short inspection)
+--   4. role still unknown: if every spec of the class gives the same answer,
+--      that decides (a Mage is always dps). Otherwise the player is hidden
+--      (unless "show unknown" is on) until the inspection tells the spec.
 local function Evaluate(unit, guid, identity)
     local isSelf, name = identity.isSelf, identity.name
     local key = name and name:lower()
@@ -584,22 +584,29 @@ local function Evaluate(unit, guid, identity)
     else
         spec = identity.knownSpec
     end
-    local candidates
-    if not spec then
-        candidates = CandidateSpecs(specs, Plain(Call(UnitGroupRolesAssigned, unit)))
+
+    local role = Plain(Call(UnitGroupRolesAssigned, unit))
+    if role ~= "TANK" and role ~= "HEALER" and role ~= "DAMAGER" then
+        role = spec and spec.role or nil
+    end
+    if not spec then -- for the icon: the only spec of the class with that role
+        local candidates = CandidateSpecs(specs, role)
         if #candidates == 1 then spec = candidates[1] end
     end
-    if spec then return forced or IsSpecEnabled(spec.id), spec, false, false end
+    local wantIcon = not isSelf and db.specIcons and spec == nil
+
+    if role then
+        local show = forced or IsRoleEnabled(role)
+        return show, spec, spec == nil, show and wantIcon
+    end
 
     local anyOn, anyOff = false, false
-    for i = 1, #candidates do
-        if IsSpecEnabled(candidates[i].id) then anyOn = true else anyOff = true end
+    for i = 1, #specs do
+        if IsRoleEnabled(specs[i].role) then anyOn = true else anyOff = true end
     end
-    local ambiguous = anyOn and anyOff
     local show = forced or (anyOn and (not anyOff or db.showUnknown))
-    -- Inspect when the spec decides, or to show the spec icon of a shown bar.
-    local needsInspect = not isSelf and (ambiguous or (show and db.specIcons))
-    return show, nil, true, needsInspect
+    local needsInspect = not isSelf and ((anyOn and anyOff) or (show and wantIcon))
+    return show, spec, spec == nil, needsInspect
 end
 
 local function GetGroupUnits(out)
@@ -1383,32 +1390,8 @@ local function SetOption(key, value)
     end
 end
 
-local function SetSpecEnabled(specID, enabled)
-    db.specs[specID] = enabled and true or false
-    ScheduleRebuild(true)
-end
-
--- All specs of a class on, or off if they were all on already.
-local function ToggleClass(classFile)
-    local specs = specsByClass[classFile]
-    if not specs then return end
-    local allOn = true
-    for i = 1, #specs do
-        if not IsSpecEnabled(specs[i].id) then allOn = false end
-    end
-    for i = 1, #specs do db.specs[specs[i].id] = not allOn end
-    ScheduleRebuild(true)
-end
-
--- mode: "default" (healer specs), "all" or "none"
-local function SetAllSpecs(mode)
-    for id in pairs(specInfoByID) do
-        if mode == "default" then
-            db.specs[id] = nil
-        else
-            db.specs[id] = (mode == "all")
-        end
-    end
+local function SetRoleEnabled(role, enabled)
+    db.roles[role] = enabled and true or false
     ScheduleRebuild(true)
 end
 
@@ -1621,9 +1604,14 @@ local function Initialize()
     for k, v in pairs(DEFAULTS) do
         if db[k] == nil then db[k] = v end
     end
-    for _, key in ipairs({ "include", "exclude", "specs" }) do
+    for _, key in ipairs({ "include", "exclude" }) do
         if type(db[key]) ~= "table" then db[key] = {} end
     end
+    if type(db.roles) ~= "table" then db.roles = {} end
+    for role, on in pairs(DEFAULT_ROLES) do
+        if db.roles[role] == nil then db.roles[role] = on end
+    end
+    db.specs = nil -- the class / spec filter of versions 1.1 - 1.4
     L = STRINGS[db.lang] or STRINGS.hu or L
     inCombat = (Plain(Call(UnitAffectingCombat, "player")) or Plain(Call(InCombatLockdown))) and true or false
 
@@ -1696,11 +1684,8 @@ SlashCmdList.MANABAR = HandleSlash
 
 ns.GetDB = function() return db end
 ns.GetL = function() return L end
-ns.GetClassSpecs = function() return classSpecs end
-ns.IsSpecEnabled = IsSpecEnabled
-ns.SetSpecEnabled = SetSpecEnabled
-ns.SetAllSpecs = SetAllSpecs
-ns.ToggleClass = ToggleClass
+ns.IsRoleEnabled = IsRoleEnabled
+ns.SetRoleEnabled = SetRoleEnabled
 ns.SetOption = SetOption
 ns.FONT = FONT
 ns.WHITE_TEXTURE = WHITE_TEXTURE
