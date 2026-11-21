@@ -310,7 +310,8 @@ test("client without curve objects: plain math, and secrets still reach the bar"
     M.run(0.15)
     local thalia = byName(ns, "Thalia")
     truthy(thalia.secretValue, "secret value passed to the bar")
-    eq(thalia.perc, "", "no % without curves")
+    eq(thalia.perc, "4500", "the raw mana instead of a % without curves")
+    color(thalia, 0.3, 0.55, 1, "neutral mana color")
     M.run(0.5)
     eq(ns.GetSummaryBar().perc.__text, "?", "no average without curves")
     noDebugErrors()
@@ -370,6 +371,113 @@ test("secret names, flags and unit comparison in combat do not break the roster"
     eq(ns.GetActiveBars(), 3, "bars")
     eq(rows(ns)[1].name, "Myra", "you are still first")
     truthy(rows(ns)[2].name ~= nil, "secret names are displayed")
+    noDebugErrors()
+end)
+
+test("combat: hidden names / classes / GUIDs do not make the bars disappear", function()
+    local ns = start({ group = "party" })
+    M.setCombat(true)
+    for _, flag in ipairs({ "restricted", "secretNames", "secretClass", "secretGuid", "secretExists",
+        "secretCompare", "secretFlags" }) do
+        M.flags[flag] = true
+    end
+    M.fire("GROUP_ROSTER_UPDATE")
+    M.fire("UNIT_NAME_UPDATE", "party1")
+    M.run(0.6)
+    eq(names(ns), "Myra,Fern,Thalia", "bars kept through roster events")
+    eq(byName(ns, "Thalia").perc, "45%", "mana still shown")
+    openOptions(ns)
+    M.click(specCheck(ns, 264)) -- settings changes rebuild at once, from remembered data
+    M.run(0.3)
+    eq(names(ns), "Myra,Fern", "Resto Shaman unticked in combat")
+    M.click(specCheck(ns, 264))
+    M.run(0.3)
+    eq(names(ns), "Myra,Fern,Thalia", "and back")
+    eq(byName(ns, "Thalia").icon, M.specIcon(264), "remembered spec icon")
+    M.member("party1").mana = 2000
+    M.run(0.6)
+    eq(byName(ns, "Thalia").perc, "20%", "mana keeps updating in combat")
+    noDebugErrors()
+end)
+
+test("combat: someone leaves, the remaining bars follow their players", function()
+    local ns = start({ group = "party" })
+    M.setCombat(true)
+    M.flags.restricted = true
+    M.flags.secretNames = true
+    M.flags.secretClass = true
+    local members = party5()
+    table.remove(members, 3) -- Brug leaves: Fern becomes party2, Zed party3
+    M.setGroup("party", members)
+    M.fire("GROUP_ROSTER_UPDATE")
+    M.run(0.3)
+    eq(names(ns), "Myra,Fern,Thalia", "same players")
+    eq(byName(ns, "Fern").unit, "party2", "Fern's new unit")
+    eq(byName(ns, "Fern").perc, "29%", "her mana")
+    M.setCombat(false)
+    M.flags.secretNames, M.flags.secretClass = false, false
+    M.run(0.3)
+    eq(names(ns), "Myra,Fern,Thalia", "after the fight")
+end)
+
+test("combat: a delayed inspection retry waits for the end of the fight", function()
+    local ns = start({ group = "party", members = partyNoRole(105) })
+    M.flags.inspectNeverAnswers = true
+    M.run(8) -- request sent, timed out: a retry rebuild is due in ~31 s
+    eq(#M.inspectRequests, 1, "first request")
+    M.setCombat(true)
+    M.flags.secretClass = true
+    M.flags.inspectNeverAnswers = false
+    M.run(40)
+    eq(#M.inspectRequests, 1, "nothing in combat")
+    eq(names(ns), "Myra,Thalia", "list untouched in combat")
+    M.flags.secretClass = false
+    M.setCombat(false)
+    M.run(5)
+    eq(#M.inspectRequests, 2, "retried after the fight")
+    eq(names(ns), "Myra,Fern,Thalia", "resolved")
+end)
+
+test("addon curves refused: Blizzard's CurveConstants keep the bars working", function()
+    local ns = start({ group = "party", db = { welcomed = true } })
+    M.flags.restricted = true
+    M.flags.customCurvesFail = true
+    M.run(0.6)
+    local fern = byName(ns, "Fern")
+    eq(fern.perc, "29%", "rounded percentage")
+    near(fern.value, 0.29, "bar value")
+    truthy(fern.secretValue, "secret value on the bar")
+    color(fern, 1, 0.58, 0, "color from our curve object")
+    local length = visualAverage(ns)
+    near(length, (0.8 + 0.29 + 0.45) / 3, "visual average still drawn", 1e-9)
+end)
+
+test("all curves refused: the raw mana is shown", function()
+    local ns = start({ group = "party", db = { welcomed = true } })
+    M.flags.restricted = true
+    M.flags.allCurvesFail = true
+    M.run(0.6)
+    local thalia = byName(ns, "Thalia")
+    eq(thalia.perc, "4500", "raw mana")
+    near(thalia.value, 4500, "bar value")
+    truthy(thalia.secretValue, "secret value on the bar")
+    color(thalia, 0.3, 0.55, 1, "neutral color")
+    eq(byName(ns, "Myra").perc, "80%", "own readable mana")
+end)
+
+test("/manabar diag reports what the game lets the addon read", function()
+    local ns = start({ group = "party" })
+    M.setCombat(true)
+    M.flags.restricted = true
+    M.flags.secretNames = true
+    M.clearChat()
+    slash("diag")
+    local text = M.chatText()
+    contains(text, "IN COMBAT", "combat state")
+    contains(text, "player: name=Myra class=PRIEST", "readable values")
+    contains(text, "party1: name=secret", "secret name")
+    contains(text, "mana=secret", "secret mana")
+    contains(text, "max=1e+04", "readable max mana")
     noDebugErrors()
 end)
 

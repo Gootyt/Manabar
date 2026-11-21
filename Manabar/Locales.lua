@@ -70,6 +70,7 @@ ns.STRINGS = {
             "  list - kézi listák kiírása",
             "  test - tesztmód (minta healerek)",
             "  lang hu | en - nyelv",
+            "  diag - mit enged olvasni a játék (hibabejelentéshez, harc közben is)",
         },
     },
 
@@ -140,6 +141,7 @@ ns.STRINGS = {
             "  list - print the manual lists",
             "  test - test mode (sample healers)",
             "  lang hu | en - language",
+            "  diag - what the game lets the addon read (for bug reports, also in combat)",
         },
     },
 }

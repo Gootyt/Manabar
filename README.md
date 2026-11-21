@@ -64,6 +64,7 @@ Első indításkor az ablak feloldva, középen jelenik meg: húzd a helyére, m
 | `/manabar list` | kézi listák kiírása |
 | `/manabar test` | tesztmód minta healerekkel (pozicionáláshoz, kipróbáláshoz) |
 | `/manabar lang hu` / `lang en` | nyelv |
+| `/manabar diag` | kiírja, mit enged olvasni a játék (név, kaszt, mana: olvasható vagy `secret`) – harc közben is futtatható, hibabejelentéshez |
 | `/manabar debug` | hibakeresési üzenetek be/ki (hibabejelentéshez hasznos) |
 
 ## Hogyan dönti el, kit mutasson?
@@ -90,8 +91,15 @@ A WoW Forever a Midnight kliensre épül, így az addonokra ugyanazok a szabály
 vonatkoznak: harc közben a játék a többi játékos adatait (pl. manáját) „titkosított”
 értékként adhatja át, amivel addon nem számolhat.
 
-- A **barok működnek**: a %-ot és a színt a játék saját, erre szolgáló
-  curve-függvényei számolják ki, az addon csak továbbadja őket a kijelzőnek.
+- A **barok harc közben is működnek**: a %-ot és a színt a játék saját, erre szolgáló
+  curve-függvényei számolják ki, az addon csak továbbadja őket a kijelzőnek. Ha a játék
+  az addon saját görbéit elutasítaná, a Blizzard beépített görbéivel, végső esetben a
+  nyers mana-számmal működik tovább.
+- Harc közben a játék a csapattagok nevét, kasztját is elrejtheti. Ezért harcban a lista
+  csak akkor épül újra, ha valaki ki- vagy belép, és ilyenkor is a harc előtt megjegyzett
+  adatokkal dolgozik – a barok nem tűnnek el.
+- Ha harcban mégsem látszanak a barok: nézd meg, hogy a beállításokban nincs-e bepipálva
+  a „Csak harcon kívül látszik”, és harc közben futtasd a `/manabar diag` parancsot.
 - Az **átlag** viszont összeadás, azt az addon nem végezheti el titkosított értékeken,
   ezért számot nem tud kiírni. Helyette a játék rajzolja ki: a healerek bar-darabjai
   egymás után kerülnek (mindegyik a teljes szélesség 1/N-ed részén), így a kitöltés hossza

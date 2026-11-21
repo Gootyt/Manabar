@@ -46,6 +46,7 @@ local GRADIENT = {
     { 1.0, 0, 1, 0 },
 }
 local STATE_COLOR = { 0.4, 0.4, 0.4 } -- offline / dead / unknown
+local MANA_COLOR  = { 0.3, 0.55, 1 }  -- when no color can be worked out
 
 -- Added to the percentage so float rounding (0.29 * 100 = 28.9999...) never
 -- makes "%d" show one percent too little.
@@ -127,6 +128,9 @@ local drinkNames, drinkNameList = {}, {}
 local drinkScanners = {}
 local seenErrors = {}
 local scratchUnits = {}
+local identityByGuid, identityByToken = {}, {} -- class / name / "me", remembered
+local rosterKey                                -- group type + size at the last rebuild
+local constFrac, constPct                      -- Blizzard's CurveConstants, as fallback
 
 local classSpecs = {}         -- { { classFile, classID, name, specs = { { id, name, role } } } }
 local specsByClass = {}       -- classFile -> specs
@@ -245,6 +249,9 @@ local function BuildCurves()
         useCurves = true
     else
         Debug(err)
+    end
+    if type(CurveConstants) == "table" then
+        constFrac, constPct = CurveConstants.ZeroToOne, CurveConstants.ScaleTo100
     end
 end
 
@@ -498,7 +505,9 @@ local function OnSpecChanged(unit)
         if guid then
             specCache[guid] = nil
             inspectFailedAt[guid] = nil
+            if identityByGuid[guid] then identityByGuid[guid].knownSpec = nil end
         end
+        if identityByToken[unit] then identityByToken[unit].knownSpec = nil end
     end
     ScheduleRebuild()
 end
@@ -507,11 +516,37 @@ end
 -- Who is shown
 -------------------------------------------------------------------------------
 
+-- true / false, or nil while the game hides the answer
 local function IsSelfUnit(unit, guid)
     if unit == "player" then return true end
     local same = Plain(Call(UnitIsUnit, unit, "player"))
     if same ~= nil then return same and true or false end
-    return guid ~= nil and guid == Plain(Call(UnitGUID, "player"))
+    local playerGuid = Plain(Call(UnitGUID, "player"))
+    if guid and playerGuid then return guid == playerGuid end
+    return nil
+end
+
+-- Class, name and "is it me" of a group member. In combat the game may hide
+-- them (secret values); then the last readable answer for that player is used
+-- (found by GUID, or by unit token if the GUID is hidden too), so the bars do
+-- not disappear in a fight.
+local function UnitIdentity(unit, guid)
+    local known = (guid and identityByGuid[guid]) or (not guid and identityByToken[unit]) or nil
+    local _, classFile = Call(UnitClass, unit)
+    classFile = Plain(classFile)
+    if not classFile then return known end
+    local isSelf = IsSelfUnit(unit, guid)
+    if isSelf == nil then isSelf = (known and known.isSelf) or false end
+    local same = known and known.classFile == classFile
+    local identity = {
+        classFile = classFile,
+        name = Plain((Call(UnitName, unit))) or (same and known.name) or nil,
+        isSelf = isSelf,
+        knownSpec = same and known.knownSpec or nil,
+    }
+    if guid then identityByGuid[guid] = identity end
+    identityByToken[unit] = identity
+    return identity
 end
 
 -- The specs of a class that fit a group role (all of them without a role).
@@ -534,17 +569,21 @@ end
 --      that is the spec. If all candidates are ticked (or none), the answer is
 --      clear anyway. Otherwise the player is hidden (unless "show unknown" is
 --      on) until a short inspection tells the spec.
-local function Evaluate(unit, isSelf, name, guid)
+local function Evaluate(unit, guid, identity)
+    local isSelf, name = identity.isSelf, identity.name
     local key = name and name:lower()
     if key and db.exclude[key] then return false, nil, false, false end
     local forced = (key and db.include[key]) and true or false
 
-    local _, classFile = Call(UnitClass, unit)
-    classFile = Plain(classFile)
-    local specs = classFile and specsByClass[classFile]
+    local specs = specsByClass[identity.classFile]
     if not specs then return forced, nil, false, false end
 
     local spec = KnownSpec(unit, isSelf, guid, specs)
+    if spec then
+        identity.knownSpec = spec -- kept for fights, when inspect data may be hidden
+    else
+        spec = identity.knownSpec
+    end
     local candidates
     if not spec then
         candidates = CandidateSpecs(specs, Plain(Call(UnitGroupRolesAssigned, unit)))
@@ -599,16 +638,16 @@ local function CollectUnits()
     local n = GetGroupUnits(scratchUnits)
     for i = 1, n do
         local unit = scratchUnits[i]
-        if Plain(Call(UnitExists, unit)) then
+        if Plain(Call(UnitExists, unit)) ~= false then
             local guid = Plain(Call(UnitGUID, unit))
             if guid then guidToUnit[guid] = unit end
-            local isSelf = IsSelfUnit(unit, guid)
-            if not isSelf or db.showSelf then
-                local name = Plain((Call(UnitName, unit)))
-                local show, spec, specUnknown, needsInspect = Evaluate(unit, isSelf, name, guid)
+            local identity = UnitIdentity(unit, guid)
+            if identity and (not identity.isSelf or db.showSelf) then
+                local show, spec, specUnknown, needsInspect = Evaluate(unit, guid, identity)
                 if show then
                     list[#list + 1] = {
-                        unit = unit, name = name, isSelf = isSelf, spec = spec, specUnknown = specUnknown,
+                        unit = unit, name = identity.name, isSelf = identity.isSelf,
+                        spec = spec, specUnknown = specUnknown,
                     }
                 end
                 if needsInspect then QueueInspect(guid) end
@@ -707,35 +746,56 @@ end
 -- Colors a texture by a unit's (possibly secret) mana through a color curve.
 local function ApplyCurveColor(tex, unit, frac, curve)
     local ok, err = pcall(ApplyColorFromUnit, tex, unit, curve)
-    if not ok then
-        Debug(err)
-        ok, err = pcall(ApplyColorFromFraction, tex, frac, curve)
-        if not ok then Debug(err) end
+    if ok then return end
+    Debug(err)
+    ok, err = pcall(ApplyColorFromFraction, tex, frac, curve)
+    if ok then return end
+    Debug(err)
+    tex:SetVertexColor(MANA_COLOR[1], MANA_COLOR[2], MANA_COLOR[3])
+end
+
+-- UnitPowerPercent through our curve, or through Blizzard's equivalent if the
+-- game refuses ours. Returns the value (maybe secret) and whether it came from
+-- the fallback.
+local function PowerPercent(unit, curve, fallback)
+    local ok, v = pcall(UnitPowerPercent, unit, PT_MANA, false, curve)
+    if ok and v then return v, false end
+    if not ok then Debug(v) end
+    if fallback then
+        ok, v = pcall(UnitPowerPercent, unit, PT_MANA, false, fallback)
+        if ok and v then return v, true end
+        if not ok then Debug(v) end
     end
+    return nil
 end
 
 -- Secret-safe path: the values may be secret, they only go into widgets.
--- Returns the mana fraction when it is not secret.
+-- Returns handled, and the mana fraction when it is not secret.
 local function UpdateManaCurve(bar, unit)
-    local frac = UnitPowerPercent(unit, PT_MANA, false, fracCurve)
-    if not frac then return nil end
+    local frac = PowerPercent(unit, fracCurve, constFrac)
+    if not frac then return false end
     local sb = bar.status
     sb:SetMinMaxValues(0, 1)
     sb:SetValue(frac)
-    local pct = UnitPowerPercent(unit, PT_MANA, false, pctCurve)
-    if pct then bar.perc:SetFormattedText("%d%%", pct) end
+    local pct, blizzard = PowerPercent(unit, pctCurve, constPct)
+    if pct then
+        -- Blizzard's ScaleTo100 has no rounding guard (0.29 -> 28.99...): round it
+        bar.perc:SetFormattedText(blizzard and "%.0f%%" or "%d%%", pct)
+    end
     ApplyCurveColor(sb:GetStatusBarTexture(), unit, frac, colorCurve)
-    return Plain(frac)
+    return true, Plain(frac)
 end
 
--- Fallback without curve objects; does math only on non-secret values.
+-- Fallback without curves; does math only on non-secret values. With secret
+-- values the bar is still filled by the game and the mana shown as a number.
 local function UpdateManaPlain(bar, unit)
     local cur, max = UnitPower(unit, PT_MANA), UnitPowerMax(unit, PT_MANA)
     if issecretvalue(cur) or issecretvalue(max) then
         local sb = bar.status
         sb:SetMinMaxValues(0, max)
         sb:SetValue(cur)
-        bar.perc:SetText("")
+        bar.perc:SetFormattedText("%d", cur)
+        sb:GetStatusBarTexture():SetVertexColor(MANA_COLOR[1], MANA_COLOR[2], MANA_COLOR[3])
         return nil
     end
     cur, max = cur or 0, max or 0
@@ -747,9 +807,9 @@ end
 
 local function UpdateMana(bar, unit)
     if useCurves then
-        local ok, frac = pcall(UpdateManaCurve, bar, unit)
-        if ok then return frac end
-        Debug(frac)
+        local ok, handled, frac = pcall(UpdateManaCurve, bar, unit)
+        if ok and handled then return frac end
+        if not ok then Debug(handled) end
     end
     local ok, frac = pcall(UpdateManaPlain, bar, unit)
     if ok then return frac end
@@ -868,7 +928,7 @@ local function ShowVisualAverage(n)
     local sb = summaryBar
     for i = 1, n do
         local unit = okBars[i].unit
-        local frac = UnitPowerPercent(unit, PT_MANA, false, fracCurve)
+        local frac = PowerPercent(unit, fracCurve, constFrac)
         sb.segments[i]:SetValue(frac or 0)
         ApplyCurveColor(sb.paints[i], unit, frac, n == 1 and colorCurve or rgCurve)
     end
@@ -1031,8 +1091,19 @@ local function UpdateVisibility()
     end
 end
 
+local function RosterKey()
+    local kind = "solo"
+    if IsInRaid and IsInRaid() then
+        kind = "raid"
+    elseif IsInGroup and IsInGroup() then
+        kind = "party"
+    end
+    return kind .. (Plain(Call(GetNumGroupMembers)) or 0)
+end
+
 local function Rebuild()
     if not frame then return end
+    rosterKey = RosterKey()
     wipe(unitToBar)
     local list = testMode and FAKE_HEALERS or CollectUnits()
     activeBars = #list
@@ -1065,7 +1136,10 @@ local function Rebuild()
     UpdateVisibility()
 end
 
-ScheduleRebuild = function()
+-- force: also in combat (the settings changed). Otherwise a fight only rebuilds
+-- the list when the group itself changed; the rest waits until it ends.
+ScheduleRebuild = function(force)
+    if not force and inCombat and rosterKey == RosterKey() then return end
     if rebuildPending then return end
     if C_Timer and C_Timer.After then
         rebuildPending = true
@@ -1305,13 +1379,13 @@ local function SetOption(key, value)
         Layout()
         UpdateSummary()
     elseif key == "showSelf" or key == "showUnknown" or key == "specIcons" then
-        ScheduleRebuild()
+        ScheduleRebuild(true)
     end
 end
 
 local function SetSpecEnabled(specID, enabled)
     db.specs[specID] = enabled and true or false
-    ScheduleRebuild()
+    ScheduleRebuild(true)
 end
 
 -- All specs of a class on, or off if they were all on already.
@@ -1323,7 +1397,7 @@ local function ToggleClass(classFile)
         if not IsSpecEnabled(specs[i].id) then allOn = false end
     end
     for i = 1, #specs do db.specs[specs[i].id] = not allOn end
-    ScheduleRebuild()
+    ScheduleRebuild(true)
 end
 
 -- mode: "default" (healer specs), "all" or "none"
@@ -1335,7 +1409,7 @@ local function SetAllSpecs(mode)
             db.specs[id] = (mode == "all")
         end
     end
-    ScheduleRebuild()
+    ScheduleRebuild(true)
 end
 
 -------------------------------------------------------------------------------
@@ -1395,7 +1469,7 @@ local function ManualList(cmd, rest)
         db.include[key], db.exclude[key] = nil, nil
         Print(L.removed, name)
     end
-    ScheduleRebuild()
+    ScheduleRebuild(true)
 end
 
 local function PrintLists()
@@ -1407,6 +1481,49 @@ end
 local function ShowHelp()
     for i = 1, #L.help do
         print(i == 1 and (PREFIX .. L.help[i]) or L.help[i])
+    end
+end
+
+-- /manabar diag: which values the game lets the addon read right now.
+local function DiagValue(fn, ...)
+    if type(fn) ~= "function" then return "n/a" end
+    local ok, v = pcall(fn, ...)
+    if not ok then return "error" end
+    if issecretvalue(v) then return "secret" end
+    if v == nil then return "nil" end
+    if type(v) == "number" then return string.format("%.4g", v) end
+    return tostring(v)
+end
+
+local function DiagClass(unit)
+    local _, classFile = UnitClass(unit)
+    return classFile
+end
+
+local function DiagGuid(unit)
+    local guid = UnitGUID(unit)
+    if issecretvalue(guid) or guid == nil then return guid end
+    return "ok"
+end
+
+local function DiagPercent(unit)
+    return UnitPowerPercent(unit, PT_MANA, false, pctCurve)
+end
+
+local function Diagnose()
+    Print("diag: %s, frame %s, bars %d, curves %s, only out of combat %s",
+        inCombat and "IN COMBAT" or "out of combat", frame:IsShown() and "shown" or "hidden",
+        activeBars, useCurves and "on" or "off", db.hideInCombat and "ON" or "off")
+    local units = { "player" }
+    for i = 1, math.min(activeBars, 8) do
+        local unit = bars[i].unit
+        if unit and unit ~= "player" then units[#units + 1] = unit end
+    end
+    for _, unit in ipairs(units) do
+        print(string.format("  %s: name=%s class=%s guid=%s role=%s mana=%s max=%s pct=%s",
+            unit, DiagValue(UnitName, unit), DiagValue(DiagClass, unit), DiagValue(DiagGuid, unit),
+            DiagValue(UnitGroupRolesAssigned, unit), DiagValue(UnitPower, unit, PT_MANA),
+            DiagValue(UnitPowerMax, unit, PT_MANA), DiagValue(DiagPercent, unit)))
     end
 end
 
@@ -1461,6 +1578,8 @@ local function HandleSlash(msg)
         else
             Print(L.langHelp)
         end
+    elseif cmd == "diag" then
+        Diagnose()
     elseif cmd == "debug" then
         db.debug = not db.debug
         wipe(seenErrors)

@@ -686,7 +686,11 @@ end
 
 local API = {}
 
-function API.UnitExists(unit) return member(unit) ~= nil end
+function API.UnitExists(unit)
+    local m = member(unit)
+    if not m then return false end
+    return hideIf(M.flags.secretExists, m, true)
+end
 function API.UnitName(unit)
     local m = member(unit)
     if not m then return nil end
@@ -695,11 +699,12 @@ end
 function API.UnitClass(unit)
     local m = member(unit)
     if not m then return nil end
-    return hideIf(M.flags.secretNames, m, m.className), m.class, 1
+    return hideIf(M.flags.secretNames, m, m.className), hideIf(M.flags.secretClass, m, m.class), 1
 end
 function API.UnitGUID(unit)
     local m = member(unit)
-    return m and m.guid or nil
+    if not m then return nil end
+    return hideIf(M.flags.secretGuid, m, m.guid)
 end
 function API.UnitIsUnit(a, b)
     local ma, mb = member(a), member(b)
@@ -735,6 +740,10 @@ function API.UnitPowerPercent(unit, powerType, unmodified, curve)
     if M.issecret(unit) or M.issecret(curve) then error("UnitPowerPercent(): secret arguments are not allowed", 2) end
     if curve ~= nil and (type(curve) ~= "table" or not curve.__isCurve) then
         error("UnitPowerPercent(): curve object expected", 2)
+    end
+    if curve and M.flags.allCurvesFail then error("UnitPowerPercent(): curves refused", 2) end
+    if curve and M.flags.customCurvesFail and not curve.__blizzard then
+        error("UnitPowerPercent(): addon curves refused", 2)
     end
     local m = member(unit)
     if not m then return nil end
@@ -906,7 +915,9 @@ function M.install(opts)
     M.now = 0
     M.dragTo = nil
     M.flags = { restricted = false, secretMax = false, secretFlags = false, secretNames = false,
-        secretCompare = false, auraRestricted = nil, colorMode = "fields", inspectNeverAnswers = false }
+        secretCompare = false, auraRestricted = nil, colorMode = "fields", inspectNeverAnswers = false,
+        secretClass = false, secretGuid = false, secretExists = false,
+        customCurvesFail = false, allCurvesFail = false }
     M.state = { kind = "solo", party = {}, raid = {}, player = nil, target = nil, inCombat = false }
     -- classID -> { { specID, name, role }, ... } (WoW Forever: 3 specs per class)
     M.classSpecData = {
@@ -961,10 +972,19 @@ function M.install(opts)
         CreateCurve = function() return newCurve(false) end,
         CreateColorCurve = function() return newCurve(true) end,
     }
+    local function blizzardCurve(y1)
+        local c = newCurve(false)
+        c:AddPoint(0, 0)
+        c:AddPoint(1, y1)
+        c.__blizzard = true
+        return c
+    end
+    _G.CurveConstants = { ZeroToOne = blizzardCurve(1), ScaleTo100 = blizzardCurve(100) }
     for k, v in pairs(API) do _G[k] = v end
     if opts.noCurves then
         _G.UnitPowerPercent = nil
         _G.C_CurveUtil = nil
+        _G.CurveConstants = nil
     end
 
     M.UIParent = newObject("Frame", "UIParent", nil)
