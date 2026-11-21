@@ -43,7 +43,8 @@ ns.STRINGS = {
         optTitle        = "Manabar - beállítások",
         optDisplay      = "Megjelenítés",
         optHideInCombat = "Csak harcon kívül látszik",
-        optSummary      = "Átlag bar a lista alján (a mutatott barok átlaga)",
+        optRoleHeaders  = "Szerep fejlécek, bennük a szerep átlag manájával",
+        optSummary      = "Teljes átlag bar a lista alján (ha több szerep látszik)",
         optShowSelf     = "A saját manám is látszik",
         optShowUnknown  = "Akinek még nem ismert a szerepe, az is látszik (amíg ki nem derül)",
         optSpecIcons    = "Spec ikon a bar elején",
@@ -52,6 +53,7 @@ ns.STRINGS = {
         roleHealer      = "Healer",
         roleDamager     = "DPS",
         roleTank        = "Tank",
+        roleUnknown     = "Ismeretlen",
         optHint         = "A szerepet a csapatban beállított szerep adja; ha nincs ilyen, a spec alapján dönt "
             .. "(ezt egy rövid inspect deríti ki, csak harcon kívül). Warrior és Rogue nem jelenik meg, mert nincs "
             .. "manájuk. Ha a játék nem engedi olvasni a mana értékét, az átlagot szám nélkül, a bar hossza és "
@@ -65,7 +67,8 @@ ns.STRINGS = {
             "  scale <0.5-3> - méretarány",
             "  width <100-400> | height <12-40> - bar mérete",
             "  combat - csak harcon kívül látszik be/ki",
-            "  summary - átlag bar a lista alján be/ki",
+            "  headers - szerep fejlécek (átlaggal) be/ki",
+            "  summary - teljes átlag bar a lista alján be/ki",
             "  self - saját mana mutatása be/ki",
             "  add [név] | ignore [név] | remove [név] - kézi lista (név nélkül: target)",
             "  list - kézi listák kiírása",
@@ -114,7 +117,8 @@ ns.STRINGS = {
         optTitle        = "Manabar - settings",
         optDisplay      = "Display",
         optHideInCombat = "Only show out of combat",
-        optSummary      = "Summary bar at the bottom (average)",
+        optRoleHeaders  = "Role headers, with the role's average mana",
+        optSummary      = "Overall average bar at the bottom (with more than one role)",
         optShowSelf     = "Show my own mana too",
         optShowUnknown  = "Also show players whose role is not known yet",
         optSpecIcons    = "Spec icon at the start of the bar",
@@ -123,6 +127,7 @@ ns.STRINGS = {
         roleHealer      = "Healer",
         roleDamager     = "DPS",
         roleTank        = "Tank",
+        roleUnknown     = "Unknown",
         optHint         = "The role is the one set in the group; without one, the spec decides (found out by a "
             .. "short inspect, out of combat only). Warriors and Rogues are never shown: they have no mana. If the "
             .. "game does not let addons read the mana values, the average is shown without a number, by the bar's "
@@ -136,7 +141,8 @@ ns.STRINGS = {
             "  scale <0.5-3> - scale",
             "  width <100-400> | height <12-40> - bar size",
             "  combat - only show out of combat on/off",
-            "  summary - summary (average) bar on/off",
+            "  headers - role headers (with their average) on/off",
+            "  summary - overall average bar at the bottom on/off",
             "  self - show your own mana on/off",
             "  add [name] | ignore [name] | remove [name] - manual lists (no name: target)",
             "  list - print the manual lists",

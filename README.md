@@ -9,15 +9,20 @@ szerepű (Healer / DPS / Tank) játékosoknak – a manáját mutatja egy-egy ba
 - **Ivás jelzése**: ha valaki iszik (Drink buff), egy pohár ikon és az „Iszik” felirat
   jelenik meg a baron.
 - **Színátmenet**: 100%-on zöld, 50%-on sárga, 0%-on piros, közte folyamatos átmenet.
-- **Átlag bar** a lista alján (kikapcsolható): a mutatott barok átlagos manája.
-  Csak akkor jelenik meg, ha legalább két bar látszik. Ha a játék elrejti a mana
-  értékét (WoW Forever-ben ez a megszokott), szám nélkül, a bar hosszával és színével
-  mutatja az átlagot; a 25 / 50 / 75%-os jelek segítenek leolvasni.
+- **Szerep fejlécek**: a barok szerep szerint csoportosítva jelennek meg (Healer, DPS,
+  Tank, Ismeretlen), mindegyik csoport fölött egy fejléccel: szerep-ikon, név, létszám
+  és **a csoport átlag manája**. Ha a játék elrejti a mana értékét (WoW Forever-ben ez a
+  megszokott), az átlagot szám nélkül, a fejléc hosszával és színével mutatja; a
+  25 / 50 / 75%-os jelek segítenek leolvasni. Ha olvasható, a pontos % is kiíródik.
+- **Teljes átlag bar** a lista alján (kikapcsolható): az összes mutatott bar átlaga.
+  Fejlécekkel csak akkor jelenik meg, ha több szerep látszik (különben ugyanazt
+  mutatná, mint a fejléc).
 - **Mozgatható**: feloldott állapotban bal egérgombbal húzható. Rögzítés: jobb klikk
   az ablakon vagy `/manabar lock`.
 - **Beállítások ablak** a fogaskerék ikonra kattintva (vagy `/manabar`):
   - csak harcon kívül látszik
-  - átlag bar a lista alján
+  - szerep fejlécek (átlaggal)
+  - teljes átlag bar a lista alján
   - a saját manád is látszik-e
   - akinek még nem ismert a szerepe, az is látszódjon-e (alapból nem)
   - spec ikon a bar elején
@@ -54,7 +59,8 @@ Első indításkor az ablak feloldva, középen jelenik meg: húzd a helyére, m
 | `/manabar scale 1.2` | méretarány (0.5 – 3, tizedesvessző is jó) |
 | `/manabar width 220` / `height 20` | bar szélesség (100 – 400) / magasság (12 – 40) |
 | `/manabar combat` | csak harcon kívül látszik be/ki |
-| `/manabar summary` | átlag bar be/ki |
+| `/manabar headers` | szerep fejlécek (átlaggal) be/ki |
+| `/manabar summary` | teljes átlag bar a lista alján be/ki |
 | `/manabar self` | saját mana mutatása be/ki |
 | `/manabar add [név]` | valaki mindig látszódjon (név nélkül: a targeted) |
 | `/manabar ignore [név]` | valaki soha ne látszódjon |

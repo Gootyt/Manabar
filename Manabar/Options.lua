@@ -18,17 +18,17 @@ local CHECK_TEXTURES = {
     checked   = "Interface\\Buttons\\UI-CheckBox-Check",
 }
 
--- Blizzard's role icons, the same as in the group finder.
-local ROLE_ICONS = "Interface\\LFGFrame\\UI-LFG-ICON-PORTRAITROLES"
+-- Blizzard's role icons (the same as in the group finder), from Manabar.lua.
 local ROLES = {
-    { role = "HEALER",  text = "roleHealer",  coords = { 20 / 64, 39 / 64, 1 / 64, 20 / 64 } },
-    { role = "DAMAGER", text = "roleDamager", coords = { 20 / 64, 39 / 64, 22 / 64, 41 / 64 } },
-    { role = "TANK",    text = "roleTank",    coords = { 0, 19 / 64, 22 / 64, 41 / 64 } },
+    { role = "HEALER",  text = "roleHealer" },
+    { role = "DAMAGER", text = "roleDamager" },
+    { role = "TANK",    text = "roleTank" },
 }
 
 -- Display options: SavedVariables key + text key.
 local OPTIONS = {
     { key = "hideInCombat", text = "optHideInCombat" },
+    { key = "roleHeaders",  text = "optRoleHeaders" },
     { key = "summary",      text = "optSummary" },
     { key = "showSelf",     text = "optShowSelf" },
     { key = "showUnknown",  text = "optShowUnknown" },
@@ -142,8 +142,9 @@ local function Create()
         local icon = cb:CreateTexture(nil, "ARTWORK")
         icon:SetSize(ICON_SIZE, ICON_SIZE)
         icon:SetPoint("LEFT", cb, "RIGHT", 1, 0)
-        icon:SetTexture(ROLE_ICONS)
-        icon:SetTexCoord(entry.coords[1], entry.coords[2], entry.coords[3], entry.coords[4])
+        local coords = ns.ROLE_COORDS[role]
+        icon:SetTexture(ns.ROLE_ICONS)
+        icon:SetTexCoord(coords[1], coords[2], coords[3], coords[4])
         cb.icon = icon
         cb.label:ClearAllPoints()
         cb.label:SetPoint("LEFT", icon, "RIGHT", 3, 0)

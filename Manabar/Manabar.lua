@@ -33,7 +33,8 @@ local DEFAULTS = {
     height       = 18,
     showSelf     = true,  -- your own bar too (if your spec is selected)
     hideInCombat = false, -- only show the frame out of combat
-    summary      = true,  -- average bar at the bottom (shown with 2+ bars)
+    roleHeaders  = true,  -- a header per role, with the role's average mana
+    summary      = true,  -- overall average at the bottom (when it adds something)
     showUnknown  = false, -- show players whose spec is not known yet (when it matters)
     specIcons    = true,  -- spec icon at the start of each bar
     lang         = "hu",
@@ -57,6 +58,7 @@ local PAD              = 4
 local HEADER_HEIGHT    = 16
 local BAR_GAP          = 2
 local SUMMARY_GAP      = 4
+local GROUP_GAP        = 4   -- between the role groups
 local DIRTY_INTERVAL   = 0.1 -- seconds between event driven bar updates
 local REFRESH_INTERVAL = 0.5 -- seconds between full refreshes (state, drinking)
 local REBUILD_DELAY    = 0.2 -- debounce for roster rebuilds
@@ -97,13 +99,24 @@ local FALLBACK_SPECS = {
 local DRINK_SPELL_IDS = { 430, 431, 432, 1133, 1135, 1137, 22734 }
 local DRINK_NAMES     = { "Drink", "Food & Drink", "Refreshment" }
 
--- Sample healers for /manabar test.
-local FAKE_HEALERS = {
-    { name = "Aelinor", specID = 257, value = 0.97, rate = -0.03 },
-    { name = "Borak",   specID = 264, value = 0.40, rate = 0.08, drinking = true },
-    { name = "Celeste", specID = 65,  value = 0.63, rate = -0.05 },
-    { name = "Dorn",    specID = 105, value = 0.18, rate = -0.02 },
-    { name = "Elyra",   specID = 256, state = "offline" },
+-- Group roles in display order, with Blizzard's role icons (group finder).
+local ROLE_RANK = { HEALER = 1, DAMAGER = 2, TANK = 3, UNKNOWN = 4 }
+local ROLE_TEXT = { HEALER = "roleHealer", DAMAGER = "roleDamager", TANK = "roleTank", UNKNOWN = "roleUnknown" }
+local ROLE_ICONS = "Interface\\LFGFrame\\UI-LFG-ICON-PORTRAITROLES"
+local ROLE_COORDS = {
+    HEALER  = { 20 / 64, 39 / 64, 1 / 64, 20 / 64 },
+    DAMAGER = { 20 / 64, 39 / 64, 22 / 64, 41 / 64 },
+    TANK    = { 0, 19 / 64, 22 / 64, 41 / 64 },
+}
+
+-- Sample players for /manabar test, in display order (role groups).
+local FAKE_PLAYERS = {
+    { name = "Aelinor", role = "HEALER",  specID = 257, value = 0.97, rate = -0.03 },
+    { name = "Borak",   role = "HEALER",  specID = 264, value = 0.40, rate = 0.08, drinking = true },
+    { name = "Celeste", role = "HEALER",  specID = 65,  value = 0.63, rate = -0.05 },
+    { name = "Elyra",   role = "HEALER",  specID = 256, state = "offline" },
+    { name = "Dorn",    role = "DAMAGER", specID = 64,  value = 0.18, rate = -0.02 },
+    { name = "Brom",    role = "TANK",    specID = 66,  value = 0.55, rate = -0.01 },
 }
 
 -------------------------------------------------------------------------------
@@ -123,7 +136,9 @@ local dirtyPending = false
 local dirtyTimer, refreshTimer = 0, 0
 local rebuildPending = false
 local fracCurve, pctCurve, colorCurve, rgCurve
-local okBars = {}             -- scratch: the bars that count for the average
+local okBars = {}             -- scratch: the bars that count for an average
+local headers = {}            -- role -> header bar (role name + the role's average)
+local groups = {}             -- { { role, first, last } } bar ranges per role
 local useCurves = false
 local drinkNames, drinkNameList = {}, {}
 local drinkScanners = {}
@@ -589,6 +604,15 @@ local function Evaluate(unit, guid, identity)
     if role ~= "TANK" and role ~= "HEALER" and role ~= "DAMAGER" then
         role = spec and spec.role or nil
     end
+    if not role then -- every spec of the class has the same role: a Mage is always dps
+        role = specs[1] and specs[1].role
+        for i = 2, #specs do
+            if specs[i].role ~= role then
+                role = nil
+                break
+            end
+        end
+    end
     if not spec then -- for the icon: the only spec of the class with that role
         local candidates = CandidateSpecs(specs, role)
         if #candidates == 1 then spec = candidates[1] end
@@ -597,7 +621,7 @@ local function Evaluate(unit, guid, identity)
 
     if role then
         local show = forced or IsRoleEnabled(role)
-        return show, spec, spec == nil, show and wantIcon
+        return show, spec, spec == nil, show and wantIcon, role
     end
 
     local anyOn, anyOff = false, false
@@ -606,7 +630,7 @@ local function Evaluate(unit, guid, identity)
     end
     local show = forced or (anyOn and (not anyOff or db.showUnknown))
     local needsInspect = not isSelf and ((anyOn and anyOff) or (show and wantIcon))
-    return show, spec, spec == nil, needsInspect
+    return show, spec, spec == nil, needsInspect, nil
 end
 
 local function GetGroupUnits(out)
@@ -629,6 +653,8 @@ local function GetGroupUnits(out)
 end
 
 local function SortEntries(a, b)
+    local ra, rb = ROLE_RANK[a.role or "UNKNOWN"], ROLE_RANK[b.role or "UNKNOWN"]
+    if ra ~= rb then return ra < rb end
     if a.isSelf ~= b.isSelf then return a.isSelf end
     local an, bn = a.name, b.name
     if an and bn then
@@ -650,11 +676,11 @@ local function CollectUnits()
             if guid then guidToUnit[guid] = unit end
             local identity = UnitIdentity(unit, guid)
             if identity and (not identity.isSelf or db.showSelf) then
-                local show, spec, specUnknown, needsInspect = Evaluate(unit, guid, identity)
+                local show, spec, specUnknown, needsInspect, role = Evaluate(unit, guid, identity)
                 if show then
                     list[#list + 1] = {
                         unit = unit, name = identity.name, isSelf = identity.isSelf,
-                        spec = spec, specUnknown = specUnknown,
+                        spec = spec, specUnknown = specUnknown, role = role,
                     }
                 end
                 if needsInspect then QueueInspect(guid) end
@@ -861,8 +887,8 @@ local function RefreshBar(bar, scanAura)
 end
 
 local function AnimateFakes(elapsed)
-    for i = 1, #FAKE_HEALERS do
-        local f = FAKE_HEALERS[i]
+    for i = 1, #FAKE_PLAYERS do
+        local f = FAKE_PLAYERS[i]
         if f.rate then
             local v = f.value + f.rate * elapsed
             if v < 0 then v = 1 elseif v > 1 then v = 0.1 end
@@ -871,8 +897,11 @@ local function AnimateFakes(elapsed)
     end
 end
 
+-- The overall average at the bottom: only when it adds something (with role
+-- headers: when more than one role is shown).
 local function SummaryVisible()
-    return db.summary and activeBars >= 2
+    if not db.summary or activeBars < 2 then return false end
+    return not db.roleHeaders or #groups >= 2
 end
 
 -- Visual average for secret mana. Addon code may not add secret values up, but
@@ -882,8 +911,7 @@ end
 -- the visible fill is painted by n additive layers (red -> green, alpha 2/n)
 -- that add up, clamped, to the GRADIENT color of the average. The addon never
 -- learns the average itself.
-local function LayoutSegments(n)
-    local sb = summaryBar
+local function LayoutSegments(sb, n)
     local w, h = db.width - 2, db.height - 2
     if sb.segN == n and sb.segW == w and sb.segH == h then return end
     sb.segN, sb.segW, sb.segH = n, w, h
@@ -930,9 +958,8 @@ local function LayoutSegments(n)
     for i = n + 1, #paints do paints[i]:Hide() end
 end
 
-local function ShowVisualAverage(n)
-    LayoutSegments(n)
-    local sb = summaryBar
+local function ShowVisualAverage(sb, n)
+    LayoutSegments(sb, n)
     for i = 1, n do
         local unit = okBars[i].unit
         local frac = PowerPercent(unit, fracCurve, constFrac)
@@ -941,18 +968,13 @@ local function ShowVisualAverage(n)
     end
 end
 
--- Average of the shown bars (offline / dead ones do not count): an exact
--- percentage while the mana values are readable, the visual average while the
--- game keeps them secret.
-local function UpdateSummary()
-    if not summaryBar then return end
-    if not SummaryVisible() then
-        summaryBar:Hide()
-        return
-    end
+-- Average of bars[from..to] (offline / dead ones do not count) on an average
+-- bar: an exact percentage while the mana values are readable, the visual
+-- average while the game keeps them secret.
+local function UpdateAverageBar(sb, from, to)
     local sum, secret = 0, false
     wipe(okBars)
-    for i = 1, activeBars do
+    for i = from, to do
         local bar = bars[i]
         if bar.state == "ok" then
             okBars[#okBars + 1] = bar
@@ -963,7 +985,6 @@ local function UpdateSummary()
             end
         end
     end
-    local sb = summaryBar
     local n = #okBars
     local visual = false
     if n == 0 then
@@ -971,7 +992,7 @@ local function UpdateSummary()
     elseif not secret then
         SetPlainValue(sb, sum / n)
     elseif useCurves then
-        local ok, err = pcall(ShowVisualAverage, n)
+        local ok, err = pcall(ShowVisualAverage, sb, n)
         if ok then
             visual = true
             sb.status:SetMinMaxValues(0, 1)
@@ -985,7 +1006,6 @@ local function UpdateSummary()
         SetGray(sb, "?")
     end
     sb.stack:SetShown(visual)
-    sb:Show()
 end
 
 -------------------------------------------------------------------------------
@@ -1057,31 +1077,122 @@ local function StyleBar(bar, w, h, fontSize)
     bar.specIcon:SetSize(h - 4, h - 4)
 end
 
+-- A bar that shows the average mana of other bars: the role headers and the
+-- overall summary at the bottom. The visual average (see LayoutSegments) is
+-- drawn under its own bar, whose texts and marks stay on top.
+local function CreateAverageBar()
+    local ab = CreateBar()
+    ab.name:SetTextColor(1, 0.82, 0)
+    local stack = CreateFrame("Frame", nil, ab)
+    stack:SetPoint("TOPLEFT", ab, "TOPLEFT", 1, -1)
+    stack:SetPoint("BOTTOMRIGHT", ab, "BOTTOMRIGHT", -1, 1)
+    stack:SetFrameLevel(ab:GetFrameLevel() + 1)
+    ab.status:SetFrameLevel(ab:GetFrameLevel() + 2)
+    stack:Hide()
+    local paintBase = stack:CreateTexture(nil, "BACKGROUND")
+    paintBase:SetColorTexture(0, 0, 0, 1) -- the additive paints start from black
+    ab.stack, ab.paintBase = stack, paintBase
+    ab.segments, ab.paints = {}, {}
+    -- 25 / 50 / 75 % marks, to read the average without a number
+    ab.ticks = {}
+    for i, f in ipairs({ 0.25, 0.5, 0.75 }) do
+        local tick = ab.status:CreateTexture(nil, "ARTWORK", nil, 7)
+        tick:SetColorTexture(1, 1, 1, 0.3)
+        tick.frac = f
+        ab.ticks[i] = tick
+    end
+    ab:Hide()
+    return ab
+end
+
+local function PlaceTicks(ab, w, h)
+    for _, tick in ipairs(ab.ticks) do
+        tick:ClearAllPoints()
+        tick:SetSize(1, h - 4)
+        tick:SetPoint("LEFT", ab.status, "LEFT", (w - 2) * tick.frac, 0)
+    end
+end
+
+-- The header of a role group: role icon, role name with the number of
+-- players, and the role's average mana.
+local function GetHeader(role)
+    local header = headers[role]
+    if header then return header end
+    header = CreateAverageBar()
+    header.role = role
+    local icon, coords = header.specIcon, ROLE_COORDS[role]
+    if coords then
+        icon:SetTexture(ROLE_ICONS)
+        icon:SetTexCoord(coords[1], coords[2], coords[3], coords[4])
+    else
+        icon:SetTexture(UNKNOWN_SPEC_ICON)
+    end
+    header.iconShown = true
+    icon:Show()
+    AnchorName(header)
+    if header.SetBackdropBorderColor then header:SetBackdropBorderColor(1, 0.82, 0, 0.5) end
+    headers[role] = header
+    return header
+end
+
+local function UpdateHeaderTexts()
+    for _, g in ipairs(groups) do
+        GetHeader(g.role).name:SetFormattedText("%s (%d)", L[ROLE_TEXT[g.role]] or g.role, g.last - g.first + 1)
+    end
+end
+
+local function UpdateAverages()
+    if not summaryBar then return end
+    if db.roleHeaders then
+        for _, g in ipairs(groups) do
+            UpdateAverageBar(GetHeader(g.role), g.first, g.last)
+        end
+    end
+    if SummaryVisible() then
+        UpdateAverageBar(summaryBar, 1, activeBars)
+        summaryBar:Show()
+    else
+        summaryBar:Hide()
+    end
+end
+
 local function Layout()
     local w, h = db.width, db.height
     local fontSize = math.max(8, math.floor(h * 0.6 + 0.5))
-    for i = 1, #bars do
-        local bar = bars[i]
-        if i <= activeBars then
+    local y = HEADER_HEIGHT
+    for _, header in pairs(headers) do header.used = false end
+    for gi, g in ipairs(groups) do
+        if gi > 1 then y = y + GROUP_GAP end
+        if db.roleHeaders then
+            local header = GetHeader(g.role)
+            header.used = true
+            header:ClearAllPoints()
+            header:SetPoint("TOPLEFT", frame, "TOPLEFT", PAD, -y)
+            StyleBar(header, w, h, fontSize)
+            PlaceTicks(header, w, h)
+            header:Show()
+            y = y + h + BAR_GAP
+        end
+        for i = g.first, g.last do
+            local bar = bars[i]
             bar:ClearAllPoints()
-            bar:SetPoint("TOPLEFT", frame, "TOPLEFT", PAD, -(HEADER_HEIGHT + (i - 1) * (h + BAR_GAP)))
+            bar:SetPoint("TOPLEFT", frame, "TOPLEFT", PAD, -y)
             StyleBar(bar, w, h, fontSize)
             bar:Show()
-        else
-            bar:Hide()
+            y = y + h + BAR_GAP
         end
     end
-    local rows = activeBars > 0 and activeBars or 1
-    local height = HEADER_HEIGHT + rows * (h + BAR_GAP) - BAR_GAP + PAD
+    for _, header in pairs(headers) do
+        if not header.used then header:Hide() end
+    end
+    for i = activeBars + 1, #bars do bars[i]:Hide() end
+    if activeBars == 0 then y = y + h + BAR_GAP end -- room for the placeholder text
+    local height = y - BAR_GAP + PAD
     if SummaryVisible() then
         summaryBar:ClearAllPoints()
         summaryBar:SetPoint("TOPLEFT", frame, "TOPLEFT", PAD, -(height - PAD + SUMMARY_GAP))
         StyleBar(summaryBar, w, h, fontSize)
-        for _, tick in ipairs(summaryBar.ticks) do
-            tick:ClearAllPoints()
-            tick:SetSize(1, h - 4)
-            tick:SetPoint("LEFT", summaryBar.status, "LEFT", (w - 2) * tick.frac, 0)
-        end
+        PlaceTicks(summaryBar, w, h)
         height = height + SUMMARY_GAP + h
     end
     frame:SetSize(w + PAD * 2, height)
@@ -1112,7 +1223,7 @@ local function Rebuild()
     if not frame then return end
     rosterKey = RosterKey()
     wipe(unitToBar)
-    local list = testMode and FAKE_HEALERS or CollectUnits()
+    local list = testMode and FAKE_PLAYERS or CollectUnits()
     activeBars = #list
     for i = 1, activeBars do
         local info = list[i]
@@ -1138,8 +1249,19 @@ local function Rebuild()
     for i = activeBars + 1, #bars do
         bars[i].unit, bars[i].fake, bars[i].state, bars[i].frac = nil, nil, nil, nil
     end
+    wipe(groups)
+    for i = 1, activeBars do
+        local role = list[i].role or "UNKNOWN"
+        local g = groups[#groups]
+        if not g or g.role ~= role then
+            g = { role = role, first = i }
+            groups[#groups + 1] = g
+        end
+        g.last = i
+    end
+    UpdateHeaderTexts()
     Layout()
-    UpdateSummary()
+    UpdateAverages()
     UpdateVisibility()
 end
 
@@ -1163,7 +1285,7 @@ local function OnUpdate(self, elapsed)
     if testMode then
         AnimateFakes(elapsed)
         for i = 1, activeBars do RefreshBar(bars[i], true) end
-        UpdateSummary()
+        UpdateAverages()
         return
     end
 
@@ -1175,7 +1297,7 @@ local function OnUpdate(self, elapsed)
             bar.dirty, bar.dirtyAura = nil, nil
             RefreshBar(bar, true)
         end
-        UpdateSummary()
+        UpdateAverages()
         return
     end
 
@@ -1191,7 +1313,7 @@ local function OnUpdate(self, elapsed)
             RefreshBar(bar, scanAura)
         end
     end
-    UpdateSummary()
+    UpdateAverages()
 end
 
 -------------------------------------------------------------------------------
@@ -1270,6 +1392,7 @@ local function ApplyTexts()
     summaryBar.name:SetText(L.average)
     summaryBar.drinkText:SetText(L.drinking)
     for i = 1, #bars do bars[i].drinkText:SetText(L.drinking) end
+    UpdateHeaderTexts()
     if ns.ApplyOptionsTexts then ns.ApplyOptionsTexts() end
 end
 
@@ -1331,29 +1454,7 @@ local function CreateMainFrame()
         HideTooltip(self)
     end)
 
-    summaryBar = CreateBar()
-    summaryBar.name:SetTextColor(1, 0.82, 0)
-    -- Visual average (see LayoutSegments): drawn under the summary's own bar,
-    -- whose texts and ticks stay on top.
-    local stack = CreateFrame("Frame", nil, summaryBar)
-    stack:SetPoint("TOPLEFT", summaryBar, "TOPLEFT", 1, -1)
-    stack:SetPoint("BOTTOMRIGHT", summaryBar, "BOTTOMRIGHT", -1, 1)
-    stack:SetFrameLevel(summaryBar:GetFrameLevel() + 1)
-    summaryBar.status:SetFrameLevel(summaryBar:GetFrameLevel() + 2)
-    stack:Hide()
-    local paintBase = stack:CreateTexture(nil, "BACKGROUND")
-    paintBase:SetColorTexture(0, 0, 0, 1) -- the additive paints start from black
-    summaryBar.stack, summaryBar.paintBase = stack, paintBase
-    summaryBar.segments, summaryBar.paints = {}, {}
-    -- 25 / 50 / 75 % marks, to read the average without a number
-    summaryBar.ticks = {}
-    for i, f in ipairs({ 0.25, 0.5, 0.75 }) do
-        local tick = summaryBar.status:CreateTexture(nil, "OVERLAY")
-        tick:SetColorTexture(1, 1, 1, 0.3)
-        tick.frac = f
-        summaryBar.ticks[i] = tick
-    end
-    summaryBar:Hide()
+    summaryBar = CreateAverageBar()
 
     frame:SetScript("OnDragStart", function(self)
         if db.locked then return end
@@ -1382,9 +1483,9 @@ local function SetOption(key, value)
         ApplyLock()
     elseif key == "hideInCombat" then
         UpdateVisibility()
-    elseif key == "summary" then
+    elseif key == "summary" or key == "roleHeaders" then
         Layout()
-        UpdateSummary()
+        UpdateAverages()
     elseif key == "showSelf" or key == "showUnknown" or key == "specIcons" then
         ScheduleRebuild(true)
     end
@@ -1541,6 +1642,8 @@ local function HandleSlash(msg)
         ToggleOption("hideInCombat", L.optHideInCombat)
     elseif cmd == "summary" then
         ToggleOption("summary", L.optSummary)
+    elseif cmd == "headers" then
+        ToggleOption("roleHeaders", L.optRoleHeaders)
     elseif cmd == "self" then
         ToggleOption("showSelf", L.optShowSelf)
     elseif cmd == "add" or cmd == "ignore" or cmd == "remove" then
@@ -1696,6 +1799,10 @@ ns.unitToBar = unitToBar
 ns.specCache = specCache
 ns.GetActiveBars = function() return activeBars end
 ns.GetSummaryBar = function() return summaryBar end
+ns.GetHeader = function(role) return headers[role] end
+ns.GetGroups = function() return groups end
+ns.ROLE_ICONS = ROLE_ICONS
+ns.ROLE_COORDS = ROLE_COORDS
 ns.GetGearButton = function() return gearButton end
 ns.GradientRGB = GradientRGB
 ns.IsTestMode = function() return testMode end
